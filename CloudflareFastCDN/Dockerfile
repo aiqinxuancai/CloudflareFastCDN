@@ -31,8 +31,5 @@ ARG DOMAINS
 ENV CLOUDFLARE_KEY=${CLOUDFLARE_KEY} \
     DOMAINS=${DOMAINS}
 
-# 将 /cert 目录挂载到容器外部
-VOLUME ["/cert"]
-
 # 设置启动命令
 ENTRYPOINT ["dotnet", "CloudflareFastCDN.dll"]
