@@ -21,10 +21,12 @@ namespace CloudflareFastCDN
             string cfKey = File.ReadAllText("CLOUDFLARE_KEY.txt");
             string domains = File.ReadAllText("DOMAINS.txt");
             string pingThreads = "200";
+            string maxIps = "400";
 #else
             string cfKey = Environment.GetEnvironmentVariable("CLOUDFLARE_KEY");
             string domains = Environment.GetEnvironmentVariable("DOMAINS");
             string pingThreads = Environment.GetEnvironmentVariable("PING_THREADS");
+            string maxIps = Environment.GetEnvironmentVariable("MAX_IPS");
 #endif
 
             if (!isDocker && string.IsNullOrWhiteSpace(cfKey))
@@ -35,6 +37,7 @@ namespace CloudflareFastCDN
                 parameters.TryGetValue("CLOUDFLARE_KEY", out cfKey);
                 parameters.TryGetValue("DOMAINS", out domains);
                 parameters.TryGetValue("PING_THREADS", out pingThreads);
+                parameters.TryGetValue("MAX_IPS", out maxIps);
             }
 
             if (string.IsNullOrWhiteSpace(cfKey))
@@ -54,13 +57,30 @@ namespace CloudflareFastCDN
             if (int.TryParse(pingThreads, out int pingThreadsInt))
             {
                 AppConfig.PingThreads = pingThreadsInt;
+                if (AppConfig.PingThreads == 0)
+                {
+                    AppConfig.PingThreads = 1;
+                }
             }
             else
             {
-                AppConfig.PingThreads = 8;
+                AppConfig.PingThreads = 16;
             }
 
-            
+            if (int.TryParse(maxIps, out int maxIpsInt))
+            {
+                AppConfig.MaxIps = maxIpsInt;
+                if (AppConfig.MaxIps == 0)
+                {
+                    AppConfig.MaxIps = 400;
+                }
+            }
+            else
+            {
+                AppConfig.MaxIps = 400;
+            }
+
+
 
             //docker 执行？    
             while (true)
@@ -89,11 +109,40 @@ namespace CloudflareFastCDN
             return parameters;
         }
 
+        /// <summary>
+        /// 均匀取出
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="sourceArray"></param>
+        /// <param name="count"></param>
+        /// <returns></returns>
+        private static T[] SelectEvenlyDistributed<T>(T[] sourceArray, int count)
+        {
+            if (count >= sourceArray.Length)
+                return sourceArray;
+
+            T[] result = new T[count];
+            double step = (double)(sourceArray.Length - 1) / (count - 1);
+
+            for (int i = 0; i < count; i++)
+            {
+                int index = (int)Math.Round(i * step);
+                result[i] = sourceArray[index];
+            }
+
+            return result;
+        }
+
         private static async Task SingleSelect()
         {
             var processor = new IPProcessor();
 
             var ipAddresses = processor.LoadIPRanges();
+
+
+            ipAddresses = SelectEvenlyDistributed(ipAddresses.ToArray(), AppConfig.MaxIps).ToList();
+
+            //TODO 精简检测的IP数量
 
             IcmpPing task = new IcmpPing(ipAddresses);
             // 先全部执行4ping
