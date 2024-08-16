@@ -22,11 +22,13 @@ namespace CloudflareFastCDN
             string domains = File.ReadAllText("DOMAINS.txt");
             string pingThreads = "200";
             string maxIps = "400";
+            string runMinutes = "30";
 #else
             string cfKey = Environment.GetEnvironmentVariable("CLOUDFLARE_KEY");
             string domains = Environment.GetEnvironmentVariable("DOMAINS");
             string pingThreads = Environment.GetEnvironmentVariable("PING_THREADS");
             string maxIps = Environment.GetEnvironmentVariable("MAX_IPS");
+            string runMinutes = Environment.GetEnvironmentVariable("RUN_MINUTES");
 #endif
 
             if (!isDocker && string.IsNullOrWhiteSpace(cfKey))
@@ -38,6 +40,7 @@ namespace CloudflareFastCDN
                 parameters.TryGetValue("DOMAINS", out domains);
                 parameters.TryGetValue("PING_THREADS", out pingThreads);
                 parameters.TryGetValue("MAX_IPS", out maxIps);
+                parameters.TryGetValue("RUN_MINUTES", out runMinutes);
             }
 
             if (string.IsNullOrWhiteSpace(cfKey))
@@ -80,6 +83,19 @@ namespace CloudflareFastCDN
                 AppConfig.MaxIps = 400;
             }
 
+            if (int.TryParse(runMinutes, out int runMinutesInt))
+            {
+                AppConfig.RunMinutes = runMinutesInt;
+                if (AppConfig.RunMinutes == 0)
+                {
+                    AppConfig.RunMinutes = 30;
+                }
+            }
+            else
+            {
+                AppConfig.RunMinutes = 30;
+            }
+
 
 
             //docker 执行？    
@@ -87,7 +103,8 @@ namespace CloudflareFastCDN
             {
                 //30分钟执行一次
                 await SingleSelect();
-                await Task.Delay(1000 * 60 * 30);
+                Console.WriteLine($"等待{AppConfig.RunMinutes}分钟");
+                await Task.Delay(1000 * 60 * AppConfig.RunMinutes);
             }
         }
         private static Dictionary<string, string> ParseCommandLineArgs(string[] args)
@@ -116,21 +133,30 @@ namespace CloudflareFastCDN
         /// <param name="sourceArray"></param>
         /// <param name="count"></param>
         /// <returns></returns>
-        private static T[] SelectEvenlyDistributed<T>(T[] sourceArray, int count)
+        public static List<T> SampleData<T>(IList<T> sourceData, int sampleSize)
         {
-            if (count >= sourceArray.Length)
-                return sourceArray;
+            if (sampleSize >= sourceData.Count)
+                return new List<T>(sourceData);
 
-            T[] result = new T[count];
-            double step = (double)(sourceArray.Length - 1) / (count - 1);
+            Random random = new Random();
+            int sourceSize = sourceData.Count;
+            double step = (double)sourceSize / sampleSize;
 
-            for (int i = 0; i < count; i++)
+            List<T> sampledData = new List<T>(sampleSize);
+
+            for (int i = 0; i < sampleSize; i++)
             {
-                int index = (int)Math.Round(i * step);
-                result[i] = sourceArray[index];
+                // 计算理想的索引位置
+                double idealIndex = i * step;
+
+                // 在理想索引周围添加一些随机性
+                int randomOffset = random.Next(-2, 3); // 随机偏移 -2 到 2
+                int actualIndex = Math.Min(Math.Max((int)idealIndex + randomOffset, 0), sourceSize - 1);
+
+                sampledData.Add(sourceData[actualIndex]);
             }
 
-            return result;
+            return sampledData;
         }
 
         private static async Task SingleSelect()
@@ -140,7 +166,7 @@ namespace CloudflareFastCDN
             var ipAddresses = processor.LoadIPRanges();
 
 
-            ipAddresses = SelectEvenlyDistributed(ipAddresses.ToArray(), AppConfig.MaxIps).ToList();
+            ipAddresses = SampleData(ipAddresses, AppConfig.MaxIps);
 
             //TODO 精简检测的IP数量
 

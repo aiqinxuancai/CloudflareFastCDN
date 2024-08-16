@@ -18,5 +18,9 @@ namespace CloudflareFastCDN.Utils
         public static int PingThreads { get; set; } = 16;
 
         public static int MaxIps { get; set; } = 400;
+
+
+        public static int RunMinutes { get; set; } = 30;
+        
     }
 }
