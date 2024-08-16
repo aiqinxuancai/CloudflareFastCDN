@@ -13,5 +13,8 @@ namespace CloudflareFastCDN.Utils
         public static string CloudflareKey { get; set; }
 
         public static string[] Domains { get; set; }
+
+
+        public static int PingThreads { get; set; } = 4;
     }
 }

@@ -14,7 +14,7 @@ namespace CloudflareFastCDN.Utils
         private const int PingTimeout = 1000;
         private const int MaxRoutine = 1000;
 
-        private static int Threads = 200;
+        private static int Threads = AppConfig.PingThreads;
         private static int PingCount = 4;
 
         private List<IPAddress> ips;

@@ -26,9 +26,11 @@ COPY --from=build /app/out .
 # 声明构建参数
 ARG CLOUDFLARE_KEY
 ARG DOMAINS
+ARG PING_THREADS
 
 # 使用构建参数设置环境变量
 ENV CLOUDFLARE_KEY=${CLOUDFLARE_KEY} \
+    PING_THREADS=${PING_THREADS} \
     DOMAINS=${DOMAINS}
 
 # 设置启动命令

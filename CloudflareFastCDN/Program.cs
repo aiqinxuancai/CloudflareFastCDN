@@ -18,11 +18,13 @@ namespace CloudflareFastCDN
             bool isDocker = File.Exists("/.dockerenv");
 
 #if DEBUG
-            var cfKey = File.ReadAllText("CLOUDFLARE_KEY.txt");
-            var domains = File.ReadAllText("DOMAINS.txt");
+            string cfKey = File.ReadAllText("CLOUDFLARE_KEY.txt");
+            string domains = File.ReadAllText("DOMAINS.txt");
+            string pingThreads = "200";
 #else
-            var cfKey = Environment.GetEnvironmentVariable("CLOUDFLARE_KEY");
-            var domains = Environment.GetEnvironmentVariable("DOMAINS");
+            string cfKey = Environment.GetEnvironmentVariable("CLOUDFLARE_KEY");
+            string domains = Environment.GetEnvironmentVariable("DOMAINS");
+            string pingThreads = Environment.GetEnvironmentVariable("PING_THREADS");
 #endif
 
             if (!isDocker && string.IsNullOrWhiteSpace(cfKey))
@@ -32,6 +34,7 @@ namespace CloudflareFastCDN
 
                 parameters.TryGetValue("CLOUDFLARE_KEY", out cfKey);
                 parameters.TryGetValue("DOMAINS", out domains);
+                parameters.TryGetValue("PING_THREADS", out pingThreads);
             }
 
             if (string.IsNullOrWhiteSpace(cfKey))
@@ -47,6 +50,17 @@ namespace CloudflareFastCDN
 
             AppConfig.CloudflareKey = cfKey;
             AppConfig.Domains = domains.Split(',');
+
+            if (int.TryParse(pingThreads, out int pingThreadsInt))
+            {
+                AppConfig.PingThreads = pingThreadsInt;
+            }
+            else
+            {
+                AppConfig.PingThreads = 8;
+            }
+
+            
 
             //docker 执行？    
             while (true)
