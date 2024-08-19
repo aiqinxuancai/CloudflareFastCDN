@@ -96,7 +96,7 @@ namespace CloudflareFastCDN.Utils
         {
             lock (csv)
             {
-                Console.WriteLine($"完成测试 {data.IP} 延时{data.Delay.TotalMilliseconds:00}ms 丢包:{data.Sended - data.Received}");
+                Console.WriteLine($"完成测试 {data.IP} 延时{data.Delay.TotalMilliseconds:00}ms 丢包:{data.Sended - data.Received}/{data.Sended}");
                 csv.Add(data);
             }
         }

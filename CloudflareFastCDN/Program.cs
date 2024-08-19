@@ -143,22 +143,26 @@ namespace CloudflareFastCDN
             //TODO 精简检测的IP数量
 
             IcmpPing task = new IcmpPing(ipAddresses);
+            Console.WriteLine($"开始第1轮检查：全量4次Ping");
             // 先全部执行4ping
             var a = task.RunAsync().Result;
             var topPings = a.Where(a => a.Sended == 4 && a.Received == a.Sended).ToList();
             var top100Pings = topPings.Take(100);
 
+            Console.WriteLine($"开始第2轮检查：Top100,10次Ping");
             // 对前100再次10ping
             IcmpPing task100 = new IcmpPing(top100Pings.Select(a => a.IP).ToList(), 10);
             var b = task100.RunAsync().Result;
             var top100PingsSelect = b.Where(a => a.Sended == 10 && a.Received == a.Sended).ToList();
 
+            Console.WriteLine($"开始第3轮检查：Top100精选后,20次Ping");
             // 再进行一次 20ping
             IcmpPing taskLast = new IcmpPing(top100PingsSelect.Select(a => a.IP).ToList(), 20);
             var c = taskLast.RunAsync().Result;
             var topLastPingsSelect = c.Where(a => a.Sended == 20 && a.Received == a.Sended).ToList();
 
             //检查看看前5个是不是通的
+            Console.WriteLine($"开始最终检查：HTTP协议是否通畅");
             int count = 0;
             List<PingData> top5List = new List<PingData>();
             foreach (var ip in topLastPingsSelect)
@@ -167,7 +171,7 @@ namespace CloudflareFastCDN
                 var httpPing = new Httping();
 
                 var pingResult = await httpPing.SinglePing(ip.IP);
-                Console.WriteLine($"最终结果 {count} {ip.IP} {pingResult.success} {pingResult.delay.TotalMilliseconds}ms");
+                Console.WriteLine($"最终结果 [{count}] {ip.IP} HTTP畅通：{pingResult.success} HTTP延时：{pingResult.delay.TotalMilliseconds}ms");
                 if (pingResult.success)
                 {
                     ip.Delay = pingResult.delay;
@@ -204,7 +208,7 @@ namespace CloudflareFastCDN
                 }
             }
 
-            Console.WriteLine("执行完毕");
+            Console.WriteLine("单次执行完毕");
 
             //取前100个进行http测试
             //foreach (var ip in topPings)
