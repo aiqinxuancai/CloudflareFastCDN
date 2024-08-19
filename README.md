@@ -1,7 +1,7 @@
 # CloudflareFastCDN
 将CF的IP子网全拿到，然后每个子网中拿一个IP，然后进行多轮ICMPPing来筛选最快速和稳定的IP并通过API更新CF的A记录。
 
-仅支持IPv4，不测IP的下载带宽，在家里的docker上跑了几天，工作良好。
+仅支持IPv4，不测IP的下载带宽，在家里的docker上跑了几天，效果良好。
 
 ## 如何使用
 
