@@ -16,97 +16,75 @@ namespace CloudflareFastCDN
         static async Task MainAsync(string[] args)
         {
             bool isDocker = File.Exists("/.dockerenv");
+            var config = LoadConfiguration(args, isDocker);
 
-#if DEBUG
-            string cfKey = File.ReadAllText("CLOUDFLARE_KEY.txt");
-            string domains = File.ReadAllText("DOMAINS.txt");
-            string pingThreads = "200";
-            string maxIps = "400";
-            string runMinutes = "30";
-#else
-            string cfKey = Environment.GetEnvironmentVariable("CLOUDFLARE_KEY");
-            string domains = Environment.GetEnvironmentVariable("DOMAINS");
-            string pingThreads = Environment.GetEnvironmentVariable("PING_THREADS");
-            string maxIps = Environment.GetEnvironmentVariable("MAX_IPS");
-            string runMinutes = Environment.GetEnvironmentVariable("RUN_MINUTES");
-#endif
-
-            if (!isDocker && string.IsNullOrWhiteSpace(cfKey))
-            {
-                //从命令行中读取并将其添加到一个dict中，以供读取 命令行例子：--CLOUDFLARE_KEY=你的CFKEY
-                Dictionary<string, string> parameters = ParseCommandLineArgs(args);
-
-                parameters.TryGetValue("CLOUDFLARE_KEY", out cfKey);
-                parameters.TryGetValue("DOMAINS", out domains);
-                parameters.TryGetValue("PING_THREADS", out pingThreads);
-                parameters.TryGetValue("MAX_IPS", out maxIps);
-                parameters.TryGetValue("RUN_MINUTES", out runMinutes);
-            }
-
-            if (string.IsNullOrWhiteSpace(cfKey))
+            if (string.IsNullOrWhiteSpace(config.CloudflareKey))
             {
                 Console.WriteLine("缺少CFKEY");
                 return;
             }
-            if (string.IsNullOrWhiteSpace(domains))
+            if (string.IsNullOrWhiteSpace(config.Domains))
             {
                 Console.WriteLine("缺少DOMAINS");
                 return;
             }
 
-            AppConfig.CloudflareKey = cfKey;
-            AppConfig.Domains = domains.Split(',');
+            AppConfig.CloudflareKey = config.CloudflareKey;
+            AppConfig.Domains = config.Domains.Split(',');
+            AppConfig.PingThreads = ParseIntWithDefault(config.PingThreads, 16);
+            AppConfig.MaxIps = ParseIntWithDefault(config.MaxIps, 400);
+            AppConfig.RunMinutes = ParseIntWithDefault(config.RunMinutes, 30);
 
-            if (int.TryParse(pingThreads, out int pingThreadsInt))
-            {
-                AppConfig.PingThreads = pingThreadsInt;
-                if (AppConfig.PingThreads == 0)
-                {
-                    AppConfig.PingThreads = 1;
-                }
-            }
-            else
-            {
-                AppConfig.PingThreads = 16;
-            }
-
-            if (int.TryParse(maxIps, out int maxIpsInt))
-            {
-                AppConfig.MaxIps = maxIpsInt;
-                if (AppConfig.MaxIps == 0)
-                {
-                    AppConfig.MaxIps = 400;
-                }
-            }
-            else
-            {
-                AppConfig.MaxIps = 400;
-            }
-
-            if (int.TryParse(runMinutes, out int runMinutesInt))
-            {
-                AppConfig.RunMinutes = runMinutesInt;
-                if (AppConfig.RunMinutes == 0)
-                {
-                    AppConfig.RunMinutes = 30;
-                }
-            }
-            else
-            {
-                AppConfig.RunMinutes = 30;
-            }
-
-
-
-            //docker 执行？    
             while (true)
             {
-                //30分钟执行一次
                 await SingleSelect();
                 Console.WriteLine($"等待{AppConfig.RunMinutes}分钟");
-                await Task.Delay(1000 * 60 * AppConfig.RunMinutes);
+                await Task.Delay(TimeSpan.FromMinutes(AppConfig.RunMinutes));
             }
         }
+
+        static (string CloudflareKey, string Domains, string PingThreads, string MaxIps, string RunMinutes) LoadConfiguration(string[] args, bool isDocker)
+        {
+            string cfKey, domains, pingThreads, maxIps, runMinutes;
+
+#if DEBUG
+            cfKey = File.ReadAllText("CLOUDFLARE_KEY.txt");
+            domains = File.ReadAllText("DOMAINS.txt");
+            pingThreads = "16";
+            maxIps = "400";
+            runMinutes = "30";
+#else
+    cfKey = Environment.GetEnvironmentVariable("CLOUDFLARE_KEY");
+    domains = Environment.GetEnvironmentVariable("DOMAINS");
+    pingThreads = Environment.GetEnvironmentVariable("PING_THREADS");
+    maxIps = Environment.GetEnvironmentVariable("MAX_IPS");
+    runMinutes = Environment.GetEnvironmentVariable("RUN_MINUTES");
+#endif
+
+            if (!isDocker && string.IsNullOrWhiteSpace(cfKey))
+            {
+                var parameters = ParseCommandLineArgs(args);
+                cfKey = parameters.GetValueOrDefault("CLOUDFLARE_KEY", cfKey);
+                domains = parameters.GetValueOrDefault("DOMAINS", domains);
+                pingThreads = parameters.GetValueOrDefault("PING_THREADS", pingThreads);
+                maxIps = parameters.GetValueOrDefault("MAX_IPS", maxIps);
+                runMinutes = parameters.GetValueOrDefault("RUN_MINUTES", runMinutes);
+            }
+
+            return (cfKey, domains, pingThreads, maxIps, runMinutes);
+        }
+
+
+
+        static int ParseIntWithDefault(string value, int defaultValue)
+        {
+            if (int.TryParse(value, out int result))
+            {
+                return result == 0 ? defaultValue : result;
+            }
+            return defaultValue;
+        }
+
         private static Dictionary<string, string> ParseCommandLineArgs(string[] args)
         {
             Dictionary<string, string> parameters = new Dictionary<string, string>();
@@ -139,24 +117,18 @@ namespace CloudflareFastCDN
                 return new List<T>(sourceData);
 
             Random random = new Random();
-            int sourceSize = sourceData.Count;
-            double step = (double)sourceSize / sampleSize;
+            List<T> shuffledData = new List<T>(sourceData);
 
-            List<T> sampledData = new List<T>(sampleSize);
-
-            for (int i = 0; i < sampleSize; i++)
+            // Fisher-Yates 洗牌算法
+            for (int i = shuffledData.Count - 1; i > 0; i--)
             {
-                // 计算理想的索引位置
-                double idealIndex = i * step;
-
-                // 在理想索引周围添加一些随机性
-                int randomOffset = random.Next(-2, 3); // 随机偏移 -2 到 2
-                int actualIndex = Math.Min(Math.Max((int)idealIndex + randomOffset, 0), sourceSize - 1);
-
-                sampledData.Add(sourceData[actualIndex]);
+                int j = random.Next(i + 1);
+                T temp = shuffledData[i];
+                shuffledData[i] = shuffledData[j];
+                shuffledData[j] = temp;
             }
 
-            return sampledData;
+            return shuffledData.Take(sampleSize).ToList();
         }
 
         private static async Task SingleSelect()

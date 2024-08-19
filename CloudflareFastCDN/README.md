@@ -1,5 +1,8 @@
 # CloudflareFastCDN
-用于自动使用ping优选状态较好的Cloudflare节点IP，并更新到指定CF的A记录中。
+用于自动使用ping优选状态较好的Cloudflare节点IP，并更新到指定CF的A记录中，仅支持IPv4。
+
+### 原理
+将CF的IP子网全拿到，然后每个子网中拿一个IP，然后进行多轮ICMPPing来筛选最快速和稳定的IP并更新。
 
 ## 如何使用
 
@@ -13,11 +16,13 @@ CloudflareFastCDN --CLOUDFLARE_KEY=你的CFKEY --DOMAINS=cdn.xxx.com,cdn.hahaha.
 ```
 docker run -e CLOUDFLARE_KEY=你的CLOUDFLARE_KEY -e DOMAINS=你要更新A记录的域名 -e PING_THREADS=16 -e MAX_IPS=400 -e RUN_MINUTES=30 aiqinxuancai/cloudfarefastcdn:latest
 ```
-* 环境变量
-```
-CLOUDFLARE_KEY
-DOMAINS
-PING_THREADS
-MAX_IPS
-RUN_MINUTES
-```
+
+
+### 变量解释
+
+* **CLOUDFLARE_KEY** #必填，请自行获取，必须有你要使用的域名的DNS区域编辑权限。
+* **DOMAINS** #必填，使用半角逗号分割，将需要更新A记录的域名写出来，比如cdn.a.com,cdn2.a.com。
+* **PING_THREADS** #ping的线程数，默认是16，如果CPU性能很高，可适当调高，**过高可能导致丢包率大幅提升**，我这里16在N100上没问题，在13900HK上可以开到200.
+* **MAX_IPS** #最多选取多少个IP来进行测试，会在网段中选取IP后。
+* **RUN_MINUTES** #运行间隔分钟，默认30分钟一次。
+
