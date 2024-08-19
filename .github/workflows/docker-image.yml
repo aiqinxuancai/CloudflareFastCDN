@@ -31,8 +31,7 @@ jobs:
 
       - name: Build with AOT
         run: |
-          dotnet publish CloudflareFastCDN/CloudflareFastCDN.csproj -c Release -r ${{ matrix.runtime }} --self-contained=true /p PublishAot=true
-          -o ./publish/${{ matrix.runtime }}
+          dotnet publish CloudflareFastCDN/CloudflareFastCDN.csproj -c Release -r ${{ matrix.runtime }} --self-contained=true /p PublishAot=true -o ./publish/${{ matrix.runtime }}
 
       - name: Zip Release
         run: |
