@@ -24,6 +24,6 @@ docker run -e CLOUDFLARE_KEY=你的CLOUDFLARE_KEY -e DOMAINS=你要更新A记录
 * **CLOUDFLARE_KEY** #必填，请自行获取，必须有你要使用的域名的DNS区域编辑权限。
 * **DOMAINS** #必填，使用半角逗号分割，将需要更新A记录的域名写出来，比如cdn.a.com,cdn2.a.com。
 * **PING_THREADS** #ping的线程数，默认是16，如果CPU性能很高，可适当调高，**过高可能导致丢包率大幅提升**，我这里16在N100上没问题，在13900HK上可以开到200.
-* **MAX_IPS** #最多选取多少个IP来进行测试，会在网段中选取IP后。
+* **MAX_IPS** #最多选取多少个IP来进行测试，会在网段中选取IP后再从中均匀随机获取。
 * **RUN_MINUTES** #运行间隔分钟，默认30分钟一次。
 
