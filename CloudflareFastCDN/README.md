@@ -1,8 +1,7 @@
 # CloudflareFastCDN
-用于自动使用ping优选状态较好的Cloudflare节点IP，并更新到指定CF的A记录中，仅支持IPv4。
+将CF的IP子网全拿到，然后每个子网中拿一个IP，然后进行多轮ICMPPing来筛选最快速和稳定的IP并更新，仅支持IPv4。
 
-### 原理
-将CF的IP子网全拿到，然后每个子网中拿一个IP，然后进行多轮ICMPPing来筛选最快速和稳定的IP并更新。
+适合不搞三网优化、IPv6优化的喜欢简单点的站长。
 
 ## 如何使用
 
