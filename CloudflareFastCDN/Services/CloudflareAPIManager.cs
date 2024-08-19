@@ -1,10 +1,9 @@
-﻿
-using CloudflareFastCDN.Utils;
+﻿using CloudflareFastCDN.Utils;
 using Flurl;
 using Flurl.Http;
-using Newtonsoft.Json.Linq;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using System.Text.Json;
 
 namespace CloudflareFastCDN.Services
 {
@@ -17,16 +16,13 @@ namespace CloudflareFastCDN.Services
 
         private const string BaseUrl = "https://api.cloudflare.com/client/v4";
 
-
         public static string APIKey = AppConfig.CloudflareKey;
-
 
         private CloudflareAPIManager()
         {
             FlurlHttp.Clients.WithDefaults(a =>
                 a
                 .WithHeader("Authorization", "Bearer " + APIKey)
-                //.WithHeader("X-Auth-Email", APIEmail)
                 .WithHeader("Content-Type", "application/json")
             );
         }
@@ -36,26 +32,22 @@ namespace CloudflareFastCDN.Services
             var responseContent =
                 await BaseUrl
                 .AppendPathSegment("zones")
-                //.AppendQueryParam("name", domain)
                 .GetStringAsync();
 
-            var responseObject = JObject.Parse(responseContent);
+            var responseObject = JsonSerializer.Deserialize<JsonElement>(responseContent);
 
-            if (!bool.Parse(responseObject["success"].ToString()))
+            if (!responseObject.GetProperty("success").GetBoolean())
             {
                 throw new Exception("Failed to get zone ID");
             }
 
-
-            foreach (var item in responseObject["result"])
+            foreach (var item in responseObject.GetProperty("result").EnumerateArray())
             {
-                //TODO 需要更严格的匹配
-                if (domain.EndsWith((string)item["name"]))
+                if (domain.EndsWith(item.GetProperty("name").GetString()))
                 {
-                    return (string)item["id"];
+                    return item.GetProperty("id").GetString();
                 }
             }
-
 
             return string.Empty;
         }
@@ -69,22 +61,21 @@ namespace CloudflareFastCDN.Services
                 .AppendPathSegment("dns_records")
                 .GetStringAsync();
 
-            var responseObject = JObject.Parse(responseContent);
+            var responseObject = JsonSerializer.Deserialize<JsonElement>(responseContent);
 
-            if (!bool.Parse(responseObject["success"].ToString()))
+            if (!responseObject.GetProperty("success").GetBoolean())
             {
                 throw new Exception("Failed to get zone ID");
             }
 
-            
             var results = new List<string>();
-            foreach (var item in responseObject["result"])
+            foreach (var item in responseObject.GetProperty("result").EnumerateArray())
             {
-                string zoneName = (string)item["zone_name"];
+                string zoneName = item.GetProperty("zone_name").GetString();
 
-                if (((string)item["name"]).Replace($".{zoneName}", "") == recordName)
+                if (item.GetProperty("name").GetString().Replace($".{zoneName}", "") == recordName)
                 {
-                    results.Add((string)item["id"]);
+                    results.Add(item.GetProperty("id").GetString());
                 }
             }
 
@@ -93,7 +84,6 @@ namespace CloudflareFastCDN.Services
 
         public async Task<bool> DeleteRecord(string zoneId, string recordId)
         {
-
             var response = await BaseUrl
                         .AppendPathSegment($"zones/{zoneId}/dns_records/{recordId}")
                         .OnError(async a => { Debug.WriteLine(await a.Response.GetStringAsync()); })
@@ -104,36 +94,32 @@ namespace CloudflareFastCDN.Services
             return true;
         }
 
-
-
         public async Task<bool> AddOrUpdateTxtRecord(string domain, string recordName, string content)
         {
-            //TODO 子域名有问题？
             var zoneId = await GetZoneId(domain);
 
             if (string.IsNullOrWhiteSpace(zoneId))
-            { 
+            {
                 return false;
             }
 
             var recordIds = await GetZonesDnsRecordId(zoneId, recordName);
 
-            var json = new JObject(
-                new JProperty("type", "TXT"),
-                new JProperty("name", recordName),
-                new JProperty("content", content),
-                new JProperty("ttl", 60)
-            );
+            var json = new
+            {
+                type = "TXT",
+                name = recordName,
+                content = content,
+                ttl = 60
+            };
 
-            var jsonStr = json.ToString();
+            var jsonStr = JsonSerializer.Serialize(json);
 
             foreach (var item in recordIds)
             {
                 await DeleteRecord(zoneId, item);
             }
 
-
-            //Add
             var response = await BaseUrl
                                 .AppendPathSegment($"zones/{zoneId}/dns_records")
                                 .OnError(async a => { Debug.WriteLine(await a.Response.GetStringAsync()); })
@@ -141,24 +127,15 @@ namespace CloudflareFastCDN.Services
 
             var result = await response.GetStringAsync();
 
-
             if (response.StatusCode != 200)
             {
                 Console.WriteLine("Failed to add TXT record");
                 return false;
             }
 
-
             return true;
         }
 
-        /// <summary>
-        /// 更新A记录
-        /// </summary>
-        /// <param name="domain"></param>
-        /// <param name="recordName"></param>
-        /// <param name="ipAddress"></param>
-        /// <returns></returns>
         public async Task<bool> AddOrUpdateARecord(string domain, string recordName, string ipAddress)
         {
             var zoneId = await GetZoneId(domain);
@@ -170,18 +147,18 @@ namespace CloudflareFastCDN.Services
 
             var recordIds = await GetZonesDnsRecordId(zoneId, recordName);
 
-            var json = new JObject(
-                new JProperty("type", "A"),
-                new JProperty("name", recordName),
-                new JProperty("content", ipAddress),
-                new JProperty("ttl", 1) // 使用自动 TTL
-            );
+            var json = new
+            {
+                type = "A",
+                name = recordName,
+                content = ipAddress,
+                ttl = 1
+            };
 
-            var jsonStr = json.ToString();
+            var jsonStr = JsonSerializer.Serialize(json);
 
             if (recordIds.Count > 0)
             {
-                // 更新现有记录
                 foreach (var recordId in recordIds)
                 {
                     var response = await BaseUrl
@@ -200,7 +177,6 @@ namespace CloudflareFastCDN.Services
             }
             else
             {
-                // 添加新记录
                 var response = await BaseUrl
                     .AppendPathSegment($"zones/{zoneId}/dns_records")
                     .OnError(async a => { Debug.WriteLine(await a.Response.GetStringAsync()); })
@@ -231,18 +207,18 @@ namespace CloudflareFastCDN.Services
 
             var recordIds = await GetZonesDnsRecordId(zoneId, recordName);
 
-            var json = new JObject(
-                new JProperty("type", "A"),
-                new JProperty("name", recordName),
-                new JProperty("content", ipAddress),
-                new JProperty("ttl", 1) // 使用自动 TTL
-            );
+            var json = new
+            {
+                type = "A",
+                name = recordName,
+                content = ipAddress,
+                ttl = 1
+            };
 
-            var jsonStr = json.ToString();
+            var jsonStr = JsonSerializer.Serialize(json);
 
             if (recordIds.Count > 0)
             {
-                // 更新现有记录
                 foreach (var recordId in recordIds)
                 {
                     var response = await BaseUrl
@@ -261,7 +237,6 @@ namespace CloudflareFastCDN.Services
             }
             else
             {
-                // 添加新记录
                 var response = await BaseUrl
                     .AppendPathSegment($"zones/{zoneId}/dns_records")
                     .OnError(async a => { Debug.WriteLine(await a.Response.GetStringAsync()); })
@@ -284,7 +259,6 @@ namespace CloudflareFastCDN.Services
             var parts = fullDomain.Split('.');
             if (parts.Length < 3)
             {
-                // 如果域名部分少于3，则认为整个字符串是根域名
                 return ("@", fullDomain);
             }
 
@@ -297,7 +271,6 @@ namespace CloudflareFastCDN.Services
                 return (recordName, tld);
             }
 
-            // 如果无法正确拆分，返回默认值
             return ("@", fullDomain);
         }
     }
