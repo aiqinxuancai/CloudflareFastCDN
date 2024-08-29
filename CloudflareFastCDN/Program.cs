@@ -31,9 +31,15 @@ namespace CloudflareFastCDN
 
             AppConfig.CloudflareKey = config.CloudflareKey;
             AppConfig.Domains = config.Domains.Split(',');
-            AppConfig.PingThreads = ParseIntWithDefault(config.PingThreads, 16);
-            AppConfig.MaxIps = ParseIntWithDefault(config.MaxIps, 400);
-            AppConfig.RunMinutes = ParseIntWithDefault(config.RunMinutes, 30);
+            AppConfig.PingThreads = ParseWithDefault(config.PingThreads, 16);
+            AppConfig.MaxIps = ParseWithDefault(config.MaxIps, 400);
+            AppConfig.RunMinutes = ParseWithDefault(config.RunMinutes, 30);
+            AppConfig.UpdateIPList = ParseWithDefault(config.UpdateIPList, false);
+
+            if (AppConfig.UpdateIPList)
+            {
+                await IPProcessor.UpdateIPList();
+            }
 
             while (true)
             {
@@ -43,9 +49,9 @@ namespace CloudflareFastCDN
             }
         }
 
-        static (string CloudflareKey, string Domains, string PingThreads, string MaxIps, string RunMinutes) LoadConfiguration(string[] args, bool isDocker)
+        static (string CloudflareKey, string Domains, string PingThreads, string MaxIps, string RunMinutes, string UpdateIPList) LoadConfiguration(string[] args, bool isDocker)
         {
-            string cfKey, domains, pingThreads, maxIps, runMinutes;
+            string cfKey, domains, pingThreads, maxIps, runMinutes, updateIPList;
 
 #if DEBUG
             cfKey = File.ReadAllText("CLOUDFLARE_KEY.txt");
@@ -53,12 +59,14 @@ namespace CloudflareFastCDN
             pingThreads = "16";
             maxIps = "400";
             runMinutes = "30";
+            updateIPList = "false";
 #else
     cfKey = Environment.GetEnvironmentVariable("CLOUDFLARE_KEY");
     domains = Environment.GetEnvironmentVariable("DOMAINS");
     pingThreads = Environment.GetEnvironmentVariable("PING_THREADS");
     maxIps = Environment.GetEnvironmentVariable("MAX_IPS");
     runMinutes = Environment.GetEnvironmentVariable("RUN_MINUTES");
+    updateIPList = Environment.GetEnvironmentVariable("UPDATE_IP_LIST");
 #endif
 
             if (!isDocker && string.IsNullOrWhiteSpace(cfKey))
@@ -69,18 +77,29 @@ namespace CloudflareFastCDN
                 pingThreads = parameters.GetValueOrDefault("PING_THREADS", pingThreads);
                 maxIps = parameters.GetValueOrDefault("MAX_IPS", maxIps);
                 runMinutes = parameters.GetValueOrDefault("RUN_MINUTES", runMinutes);
+                updateIPList = parameters.GetValueOrDefault("UPDATE_IP_LIST", updateIPList);
             }
 
-            return (cfKey, domains, pingThreads, maxIps, runMinutes);
+            return (cfKey, domains, pingThreads, maxIps, runMinutes, updateIPList);
         }
 
 
 
-        static int ParseIntWithDefault(string value, int defaultValue)
+        static T ParseWithDefault<T>(string value, T defaultValue)
         {
-            if (int.TryParse(value, out int result))
+            if (typeof(T) == typeof(int))
             {
-                return result == 0 ? defaultValue : result;
+                if (int.TryParse(value, out int intResult))
+                {
+                    return (T)(object)(intResult == 0 ? (int)(object)defaultValue : intResult);
+                }
+            }
+            else if (typeof(T) == typeof(bool))
+            {
+                if (bool.TryParse(value, out bool boolResult))
+                {
+                    return (T)(object)boolResult;
+                }
             }
             return defaultValue;
         }
@@ -134,6 +153,9 @@ namespace CloudflareFastCDN
         private static async Task SingleSelect()
         {
             var processor = new IPProcessor();
+
+            //更新IP
+
 
             var ipAddresses = processor.LoadIPRanges();
 

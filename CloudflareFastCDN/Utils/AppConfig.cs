@@ -21,6 +21,11 @@ namespace CloudflareFastCDN.Utils
 
 
         public static int RunMinutes { get; set; } = 30;
-        
+
+
+        public static bool UpdateIPList { get; set; } = false;
+
+
+
     }
 }

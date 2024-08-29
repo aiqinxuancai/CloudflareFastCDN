@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
 using System.Runtime.CompilerServices;
+using Flurl.Http;
 
 namespace CloudflareFastCDN.Utils
 {
@@ -30,6 +31,29 @@ namespace CloudflareFastCDN.Utils
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool IsIPv4(string ip) => ip.Contains('.');
+
+
+        public static async Task UpdateIPList()
+        {
+            try
+            {
+                Console.WriteLine("更新IPv4列表...");
+                var ipsRsp = await "https://www.cloudflare-cn.com/ips-v4/".GetAsync();
+                if (ipsRsp.StatusCode == 200)
+                {
+                    var ips = await ipsRsp.GetStringAsync();
+                    File.WriteAllText(DefaultInputFile, ips);
+                    Console.WriteLine("更新IPv4列表成功");
+                }
+
+            }
+            catch (Exception ex) 
+            {
+                Console.WriteLine($"更新IPv4列表失败 {ex}");
+            }
+
+
+        }
 
         private byte RandIPEndWith(byte num)
         {
