@@ -22,7 +22,7 @@ docker run -e CLOUDFLARE_KEY=你的CLOUDFLARE_KEY -e DOMAINS=你要更新A记录
 * **PING_THREADS** #ping的线程数，默认是16，如果CPU性能很高，可适当调高，**过高可能导致丢包率大幅提升**，我这里16在N100上没问题，在13900HK上可以开到200.
 * **MAX_IPS** #最多选取多少个IP来进行测试，会在网段中选取IP后再从中均匀随机获取。
 * **RUN_MINUTES** #运行间隔分钟，默认30分钟一次。
-* **UPDATE_IP_LIST** #启动时更新CF的官方IPv4列表
+* **UPDATE_IP_LIST** #启动时更新CF的官方IPv4列表，默认为false
 
 
 ## 免责声明
