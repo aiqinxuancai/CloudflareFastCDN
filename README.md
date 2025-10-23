@@ -12,8 +12,55 @@ CloudflareFastCDN --CLOUDFLARE_KEY=你的CFKEY --DOMAINS=cdn.xxx.com,cdn.hahaha.
 ```
 
 ### Docker运行
+使用Docker命令直接运行：
+```bash
+docker run -d \
+  --name cloudflare-fast-cdn \
+  --restart unless-stopped \
+  -e CLOUDFLARE_KEY=你的CLOUDFLARE_KEY \
+  -e DOMAINS=你要更新A记录的域名 \
+  -e PING_THREADS=16 \
+  -e MAX_IPS=400 \
+  -e RUN_MINUTES=30 \
+  -e UPDATE_IP_LIST=false \
+  aiqinxuancai/cloudfarefastcdn:latest
 ```
-docker run -e CLOUDFLARE_KEY=你的CLOUDFLARE_KEY -e DOMAINS=你要更新A记录的域名 -e PING_THREADS=16 -e MAX_IPS=400 -e RUN_MINUTES=30 -e UPDATE_IP_LIST=false aiqinxuancai/cloudfarefastcdn:latest
+
+### Docker Compose运行
+创建 `docker-compose.yml` 文件：
+```yaml
+version: '3.8'
+
+services:
+  cloudflare-fast-cdn:
+    image: aiqinxuancai/cloudfarefastcdn:latest
+    container_name: cloudflare-fast-cdn
+    restart: unless-stopped
+    environment:
+      # 必填项
+      CLOUDFLARE_KEY: "你的CLOUDFLARE_KEY"
+      DOMAINS: "cdn.example.com,cdn2.example.com"
+
+      # 可选项（以下为默认值）
+      PING_THREADS: "16"
+      MAX_IPS: "400"
+      RUN_MINUTES: "30"
+      UPDATE_IP_LIST: "false"
+```
+
+启动服务：
+```bash
+docker-compose up -d
+```
+
+查看日志：
+```bash
+docker-compose logs -f cloudflare-fast-cdn
+```
+
+停止服务：
+```bash
+docker-compose down
 ```
 
 ### 变量解释

@@ -1,5 +1,5 @@
 # 使用官方的 .NET SDK 镜像作为构建镜像
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 
 # 设置工作目录
 WORKDIR /app
@@ -15,7 +15,7 @@ COPY . ./
 RUN dotnet publish -c Release -o out
 
 # 使用官方的 .NET 运行时镜像作为基础镜像
-FROM mcr.microsoft.com/dotnet/runtime:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/runtime:9.0 AS runtime
 
 # 设置工作目录
 WORKDIR /app
