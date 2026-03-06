@@ -7,6 +7,9 @@ namespace CloudflareFastCDN
 {
     internal class Program
     {
+        private const int FinalPingCount = 20;
+        private const int FinalStageMaxPacketLoss = 3;
+
         static void Main(string[] args)
         {
             MainAsync(args).GetAwaiter().GetResult();
@@ -177,21 +180,28 @@ namespace CloudflareFastCDN
             var b = task100.RunAsync().Result;
             var top100PingsSelect = b.Where(a => a.Sended == 10 && a.Received == a.Sended).ToList();
 
-            Console.WriteLine($"开始第3轮检查：Top100精选后,20次Ping");
-            // 再进行一次 20ping
-            IcmpPing taskLast = new IcmpPing(top100PingsSelect.Select(a => a.IP).ToList(), 20);
+            Console.WriteLine($"开始第3轮检查：Top100精选后,{FinalPingCount}次Ping，允许最多丢包{FinalStageMaxPacketLoss}/{FinalPingCount}");
+            // 再进行一次 20ping，最终阶段允许少量丢包
+            IcmpPing taskLast = new IcmpPing(top100PingsSelect.Select(a => a.IP).ToList(), FinalPingCount);
             var c = taskLast.RunAsync().Result;
-            var topLastPingsSelect = c.Where(a => a.Sended == 20 && a.Received == a.Sended).ToList();
+            var topLastPingsSelect = c
+                .Where(a => a.Sended == FinalPingCount && a.Sended - a.Received <= FinalStageMaxPacketLoss)
+                .ToList();
+
+            if (!topLastPingsSelect.Any())
+            {
+                Console.WriteLine($"最终阶段没有IP通过：要求丢包不超过{FinalStageMaxPacketLoss}/{FinalPingCount}");
+                return;
+            }
 
             //检查看看前5个是不是通的
             Console.WriteLine($"开始最终检查：HTTP协议是否通畅");
             int count = 0;
             List<PingData> top5List = new List<PingData>();
+            var httpPing = new Httping();
             foreach (var ip in topLastPingsSelect)
             {
                 count++;
-                var httpPing = new Httping();
-
                 var pingResult = await httpPing.SinglePing(ip.IP);
                 Console.WriteLine($"最终结果 [{count}] {ip.IP} HTTP畅通：{pingResult.success} HTTP延时：{pingResult.delay.TotalMilliseconds}ms");
                 if (pingResult.success)
@@ -228,6 +238,10 @@ namespace CloudflareFastCDN
                     }
                     
                 }
+            }
+            else
+            {
+                Console.WriteLine("最终阶段没有IP通过HTTP验证，跳过DNS更新");
             }
 
             Console.WriteLine("单次执行完毕");

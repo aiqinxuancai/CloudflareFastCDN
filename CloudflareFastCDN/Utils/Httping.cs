@@ -1,89 +1,34 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Diagnostics;
+using System.Net;
+using System.Net.Http;
+using System.Net.Sockets;
 
 namespace CloudflareFastCDN.Utils
 {
-    using System;
-    using System.Collections.Concurrent;
-    using System.Diagnostics;
-    using System.Net;
-    using System.Net.Http;
-    using System.Text.RegularExpressions;
-    using System.Threading.Tasks;
-
-
     public class Httping
     {
-        private static readonly Regex OutRegexp = new Regex("[A-Z]{3}");
-        private static readonly string URL = "https://visa.cn";
-        private static readonly int PingCount = 4;
+        private const int PingCount = 4;
+        private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(4);
+        private static readonly Uri ProbeUri = new("https://www.visa.cn/");
+        private static readonly string UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
 
         public async Task<(int, TimeSpan)> Ping(IPAddress ip)
         {
-            var uri = new Uri(URL);
-            var originalHost = uri.Host;
-            var handler = new HttpClientHandler();
-            handler.AllowAutoRedirect = false;
-
-            using var client = new HttpClient(handler)
-            {
-                Timeout = TimeSpan.FromSeconds(4),
-            };
-
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
-            var request = new HttpRequestMessage(HttpMethod.Head, URL);
-            request.Headers.Host = originalHost;
-            var builder = new UriBuilder(uri)
-            {
-                Host = ip.ToString() ,
- 
-            };
-            request.RequestUri = builder.Uri;
-
-            HttpResponseMessage response = null;
-            try
-            {
-                response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine(ex);
-                return (0, TimeSpan.Zero);
-            }
-            Debug.WriteLine(((int)response.StatusCode));
-            if (!IsValidStatusCode(response.StatusCode))
-            {
-                return (0, TimeSpan.Zero);
-            }
+            using var client = CreateClient(ip);
 
             int success = 0;
             TimeSpan totalDelay = TimeSpan.Zero;
+
             for (int i = 0; i < PingCount; i++)
             {
-                request = new HttpRequestMessage(HttpMethod.Head, builder.Uri)
-                {
-                    Headers = { Host = originalHost }
-                };
-
-                if (i == PingCount - 1)
-                {
-                    request.Headers.ConnectionClose = true;
-                }
-
-                Stopwatch stopwatch = Stopwatch.StartNew();
-                try
-                {
-                    response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-                    success++;
-                    totalDelay += stopwatch.Elapsed;
-                }
-                catch
+                var pingResult = await SendProbeAsync(client);
+                if (!pingResult.success)
                 {
                     continue;
                 }
+
+                success++;
+                totalDelay += pingResult.delay;
             }
 
             return (success, totalDelay);
@@ -91,53 +36,87 @@ namespace CloudflareFastCDN.Utils
 
         public async Task<(bool success, TimeSpan delay)> SinglePing(IPAddress ip)
         {
-            var uri = new Uri(URL);
-            var originalHost = uri.Host;
-            var handler = new HttpClientHandler();
-            handler.AllowAutoRedirect = false;
+            using var client = CreateClient(ip);
+            return await SendProbeAsync(client);
+        }
 
-            using var client = new HttpClient(handler)
+        private static HttpClient CreateClient(IPAddress ip)
+        {
+            var handler = new SocketsHttpHandler
             {
-                Timeout = TimeSpan.FromSeconds(4),
+                AllowAutoRedirect = false,
+                ConnectTimeout = Timeout,
+                ConnectCallback = async (context, cancellationToken) =>
+                {
+                    var socket = new Socket(ip.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+
+                    try
+                    {
+                        await socket.ConnectAsync(new IPEndPoint(ip, context.DnsEndPoint.Port), cancellationToken);
+                        return new NetworkStream(socket, ownsSocket: true);
+                    }
+                    catch
+                    {
+                        socket.Dispose();
+                        throw;
+                    }
+                }
             };
 
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
-            var request = new HttpRequestMessage(HttpMethod.Head, URL);
-            request.Headers.Host = originalHost;
-            var builder = new UriBuilder(uri)
+            var client = new HttpClient(handler)
             {
-                Host = ip.ToString(),
+                Timeout = Timeout,
             };
-            request.RequestUri = builder.Uri;
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
+            return client;
+        }
 
-            Stopwatch stopwatch = Stopwatch.StartNew();
+        private static async Task<(bool success, TimeSpan delay)> SendProbeAsync(HttpClient client)
+        {
+            var headResult = await SendAsync(client, HttpMethod.Head);
+            if (headResult.success || !ShouldFallbackToGet(headResult.statusCode))
+            {
+                return (headResult.success, headResult.delay);
+            }
+
+            var getResult = await SendAsync(client, HttpMethod.Get);
+            return (getResult.success, getResult.delay);
+        }
+
+        private static async Task<(bool success, TimeSpan delay, HttpStatusCode statusCode)> SendAsync(HttpClient client, HttpMethod method)
+        {
+            using var request = new HttpRequestMessage(method, ProbeUri);
+            var stopwatch = Stopwatch.StartNew();
+
             try
             {
-                var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
                 stopwatch.Stop();
 
                 if (IsValidStatusCode(response.StatusCode))
                 {
-                    return (true, stopwatch.Elapsed);
+                    return (true, stopwatch.Elapsed, response.StatusCode);
                 }
-                else
-                {
-                    return (false, TimeSpan.Zero);
-                }
+
+                Debug.WriteLine($"HTTP probe failed, status code: {(int)response.StatusCode}");
+                return (false, TimeSpan.Zero, response.StatusCode);
             }
             catch (Exception ex)
             {
                 Debug.WriteLine(ex);
-                return (false, TimeSpan.Zero);
+                return (false, TimeSpan.Zero, 0);
             }
         }
 
-        private bool IsValidStatusCode(HttpStatusCode statusCode)
+        private static bool ShouldFallbackToGet(HttpStatusCode statusCode)
         {
-            return statusCode == HttpStatusCode.OK || statusCode == HttpStatusCode.MovedPermanently || statusCode == HttpStatusCode.Found;
+            return statusCode == HttpStatusCode.MethodNotAllowed || statusCode == HttpStatusCode.NotImplemented;
         }
 
-
+        private static bool IsValidStatusCode(HttpStatusCode statusCode)
+        {
+            var numericCode = (int)statusCode;
+            return numericCode >= 200 && numericCode < 400;
+        }
     }
-
 }
