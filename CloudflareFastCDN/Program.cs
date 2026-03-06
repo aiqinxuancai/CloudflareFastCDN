@@ -229,8 +229,15 @@ namespace CloudflareFastCDN
                     try
                     {
                         Console.WriteLine($"开始更新域名 {domain} {top1Data.IP}");
-                        await CloudflareAPIManager.Instance.AddOrUpdateARecord(domain, top1Data.IP.ToString());
-                        Console.WriteLine($"已完成更新域名 {domain}");
+                        var updated = await CloudflareAPIManager.Instance.AddOrUpdateARecord(domain, top1Data.IP.ToString());
+                        if (updated)
+                        {
+                            Console.WriteLine($"已完成更新域名 {domain}");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"更新域名失败 {domain}");
+                        }
                     }
                     catch (Exception ex) 
                     {
@@ -254,5 +261,6 @@ namespace CloudflareFastCDN
             //    Console.WriteLine($"{ip.IP} TCP延时{ip.Delay.TotalMilliseconds} HTTP延时{bn.Item2.TotalMilliseconds} HTTP成功{bn.Item1}");
             //}
         }
+
     }
 }

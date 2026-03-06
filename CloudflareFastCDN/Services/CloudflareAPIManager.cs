@@ -36,23 +36,31 @@ namespace CloudflareFastCDN.Services
 
             var responseObject = JsonSerializer.Deserialize<JsonElement>(responseContent);
 
-            if (!responseObject.GetProperty("success").GetBoolean())
+            if (!responseObject.TryGetProperty("success", out var successElement) || !successElement.GetBoolean())
             {
-                throw new Exception("Failed to get zone ID");
+                throw new Exception($"Failed to get zone ID. Response: {responseContent}");
             }
 
-            foreach (var item in responseObject.GetProperty("result").EnumerateArray())
+            if (!responseObject.TryGetProperty("result", out var resultElement) || resultElement.ValueKind != JsonValueKind.Array)
             {
-                if (domain.EndsWith(item.GetProperty("name").GetString()))
+                throw new Exception($"Invalid zone response. Response: {responseContent}");
+            }
+
+            foreach (var item in resultElement.EnumerateArray())
+            {
+                var zoneName = GetStringProperty(item, "name");
+                var zoneId = GetStringProperty(item, "id");
+
+                if (!string.IsNullOrWhiteSpace(zoneName) && domain.EndsWith(zoneName, StringComparison.OrdinalIgnoreCase))
                 {
-                    return item.GetProperty("id").GetString();
+                    return zoneId ?? string.Empty;
                 }
             }
 
             return string.Empty;
         }
 
-        public async Task<List<string>> GetZonesDnsRecordId(string zoneId, string recordName)
+        public async Task<List<string>> GetZonesDnsRecordId(string zoneId, string recordName, string? rootDomain = null)
         {
             var responseContent =
                 await BaseUrl
@@ -63,19 +71,31 @@ namespace CloudflareFastCDN.Services
 
             var responseObject = JsonSerializer.Deserialize<JsonElement>(responseContent);
 
-            if (!responseObject.GetProperty("success").GetBoolean())
+            if (!responseObject.TryGetProperty("success", out var successElement) || !successElement.GetBoolean())
             {
-                throw new Exception("Failed to get zone ID");
+                throw new Exception($"Failed to get DNS records. Response: {responseContent}");
+            }
+
+            if (!responseObject.TryGetProperty("result", out var resultElement) || resultElement.ValueKind != JsonValueKind.Array)
+            {
+                throw new Exception($"Invalid DNS record response. Response: {responseContent}");
             }
 
             var results = new List<string>();
-            foreach (var item in responseObject.GetProperty("result").EnumerateArray())
+            foreach (var item in resultElement.EnumerateArray())
             {
-                string zoneName = item.GetProperty("zone_name").GetString();
+                var recordId = GetStringProperty(item, "id");
+                var fullRecordName = GetStringProperty(item, "name");
 
-                if (item.GetProperty("name").GetString().Replace($".{zoneName}", "") == recordName)
+                if (string.IsNullOrWhiteSpace(recordId) || string.IsNullOrWhiteSpace(fullRecordName))
                 {
-                    results.Add(item.GetProperty("id").GetString());
+                    continue;
+                }
+
+                var normalizedRecordName = NormalizeRecordName(fullRecordName, rootDomain);
+                if (string.Equals(normalizedRecordName, recordName, StringComparison.OrdinalIgnoreCase))
+                {
+                    results.Add(recordId);
                 }
             }
 
@@ -103,7 +123,7 @@ namespace CloudflareFastCDN.Services
                 return false;
             }
 
-            var recordIds = await GetZonesDnsRecordId(zoneId, recordName);
+            var recordIds = await GetZonesDnsRecordId(zoneId, recordName, domain);
 
             var json = new
             {
@@ -145,7 +165,7 @@ namespace CloudflareFastCDN.Services
                 return false;
             }
 
-            var recordIds = await GetZonesDnsRecordId(zoneId, recordName);
+            var recordIds = await GetZonesDnsRecordId(zoneId, recordName, domain);
 
             var json = new
             {
@@ -272,6 +292,37 @@ namespace CloudflareFastCDN.Services
             }
 
             return ("@", fullDomain);
+        }
+
+        private static string? GetStringProperty(JsonElement item, string propertyName)
+        {
+            if (!item.TryGetProperty(propertyName, out var property))
+            {
+                return null;
+            }
+
+            return property.ValueKind == JsonValueKind.String ? property.GetString() : property.ToString();
+        }
+
+        private static string NormalizeRecordName(string fullRecordName, string? rootDomain)
+        {
+            if (string.IsNullOrWhiteSpace(rootDomain))
+            {
+                return fullRecordName;
+            }
+
+            if (string.Equals(fullRecordName, rootDomain, StringComparison.OrdinalIgnoreCase))
+            {
+                return "@";
+            }
+
+            var suffix = $".{rootDomain}";
+            if (fullRecordName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                return fullRecordName[..^suffix.Length];
+            }
+
+            return fullRecordName;
         }
     }
 }
