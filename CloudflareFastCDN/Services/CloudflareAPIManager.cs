@@ -135,7 +135,9 @@ namespace CloudflareFastCDN.Services
             var existingRecords = await GetDnsRecords(zoneId, "A", fullRecordName);
 
             if (existingRecords.Count > 0 &&
-                existingRecords.All(a => string.Equals(a.Content, ipAddress, StringComparison.OrdinalIgnoreCase)))
+                existingRecords.All(a =>
+                    string.Equals(a.Content, ipAddress, StringComparison.OrdinalIgnoreCase) &&
+                    a.Proxied == false))
             {
                 Console.WriteLine($"DNS record {fullRecordName} already points to {ipAddress}, skipping update");
                 return true;
@@ -146,7 +148,8 @@ namespace CloudflareFastCDN.Services
                 type = "A",
                 name = fullRecordName,
                 content = ipAddress,
-                ttl = 1
+                ttl = 1,
+                proxied = false
             };
 
             var jsonStr = JsonSerializer.Serialize(json);
@@ -155,32 +158,40 @@ namespace CloudflareFastCDN.Services
             {
                 foreach (var record in existingRecords)
                 {
-                    var response = await BaseUrl
-                        .AppendPathSegment($"zones/{zoneId}/dns_records/{record.Id}")
-                        .OnError(async a => { Debug.WriteLine(await a.Response.GetStringAsync()); })
-                        .PutStringAsync(jsonStr);
-
-                    await response.GetStringAsync();
-
-                    if (response.StatusCode != 200)
+                    try
                     {
+                        var response = await BaseUrl
+                            .AppendPathSegment($"zones/{zoneId}/dns_records/{record.Id}")
+                            .OnError(async a => { Debug.WriteLine(await a.Response.GetStringAsync()); })
+                            .PutStringAsync(jsonStr);
+
+                        await response.GetStringAsync();
+                    }
+                    catch (FlurlHttpException ex)
+                    {
+                        var responseBody = await ex.GetResponseStringAsync();
                         Console.WriteLine($"Failed to update A record: {record.Id}");
+                        Console.WriteLine(responseBody);
                         return false;
                     }
                 }
             }
             else
             {
-                var response = await BaseUrl
-                    .AppendPathSegment($"zones/{zoneId}/dns_records")
-                    .OnError(async a => { Debug.WriteLine(await a.Response.GetStringAsync()); })
-                    .PostStringAsync(jsonStr);
-
-                await response.GetStringAsync();
-
-                if (response.StatusCode != 200)
+                try
                 {
+                    var response = await BaseUrl
+                        .AppendPathSegment($"zones/{zoneId}/dns_records")
+                        .OnError(async a => { Debug.WriteLine(await a.Response.GetStringAsync()); })
+                        .PostStringAsync(jsonStr);
+
+                    await response.GetStringAsync();
+                }
+                catch (FlurlHttpException ex)
+                {
+                    var responseBody = await ex.GetResponseStringAsync();
                     Console.WriteLine("Failed to add A record");
+                    Console.WriteLine(responseBody);
                     return false;
                 }
             }
@@ -225,6 +236,7 @@ namespace CloudflareFastCDN.Services
                     var recordName = GetStringProperty(item, "name");
                     var type = GetStringProperty(item, "type");
                     var content = GetStringProperty(item, "content");
+                    var proxied = GetBoolProperty(item, "proxied");
 
                     if (string.IsNullOrWhiteSpace(recordId) ||
                         string.IsNullOrWhiteSpace(recordName) ||
@@ -233,7 +245,7 @@ namespace CloudflareFastCDN.Services
                         continue;
                     }
 
-                    results.Add(new DnsRecordInfo(recordId, recordName, type, content ?? string.Empty));
+                    results.Add(new DnsRecordInfo(recordId, recordName, type, content ?? string.Empty, proxied));
                 }
 
                 if (page >= GetTotalPages(responseObject))
@@ -337,6 +349,18 @@ namespace CloudflareFastCDN.Services
             return property.ValueKind == JsonValueKind.String ? property.GetString() : property.ToString();
         }
 
-        private sealed record DnsRecordInfo(string Id, string Name, string Type, string Content);
+        private static bool? GetBoolProperty(JsonElement item, string propertyName)
+        {
+            if (!item.TryGetProperty(propertyName, out var property))
+            {
+                return null;
+            }
+
+            return property.ValueKind == JsonValueKind.True || property.ValueKind == JsonValueKind.False
+                ? property.GetBoolean()
+                : null;
+        }
+
+        private sealed record DnsRecordInfo(string Id, string Name, string Type, string Content, bool? Proxied);
     }
 }
