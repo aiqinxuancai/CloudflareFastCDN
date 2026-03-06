@@ -7,8 +7,12 @@ namespace CloudflareFastCDN
 {
     internal class Program
     {
-        private const int FinalPingCount = 20;
-        private const int FinalStageMaxPacketLoss = 3;
+        private const int FirstRoundPingCount = 4;
+        private const int SecondRoundPingCount = 10;
+        private const int SecondRoundMaxPacketLoss = 1;
+        private const int HttpCandidateCount = 10;
+        private const int HttpProbeCount = 3;
+        private const int HttpMinSuccessCount = 2;
 
         static void Main(string[] args)
         {
@@ -36,6 +40,8 @@ namespace CloudflareFastCDN
             AppConfig.Domains = config.Domains.Split(',');
             AppConfig.PingThreads = ParseWithDefault(config.PingThreads, 16);
             AppConfig.MaxIps = ParseWithDefault(config.MaxIps, 400);
+            AppConfig.PingIntervalMs = ParseWithDefault(config.PingIntervalMs, 150);
+            AppConfig.HttpProbeUrl = string.IsNullOrWhiteSpace(config.HttpProbeUrl) ? "https://www.visa.cn/" : config.HttpProbeUrl.Trim();
             AppConfig.RunMinutes = ParseWithDefault(config.RunMinutes, 30);
             AppConfig.UpdateIPList = ParseWithDefault(config.UpdateIPList, false);
 
@@ -52,15 +58,17 @@ namespace CloudflareFastCDN
             }
         }
 
-        static (string CloudflareKey, string Domains, string PingThreads, string MaxIps, string RunMinutes, string UpdateIPList) LoadConfiguration(string[] args, bool isDocker)
+        static (string CloudflareKey, string Domains, string PingThreads, string MaxIps, string PingIntervalMs, string HttpProbeUrl, string RunMinutes, string UpdateIPList) LoadConfiguration(string[] args, bool isDocker)
         {
-            string cfKey, domains, pingThreads, maxIps, runMinutes, updateIPList;
+            string cfKey, domains, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, runMinutes, updateIPList;
 
 #if DEBUG
             cfKey = File.ReadAllText("CLOUDFLARE_KEY.txt");
             domains = File.ReadAllText("DOMAINS.txt");
             pingThreads = "16";
             maxIps = "400";
+            pingIntervalMs = "150";
+            httpProbeUrl = "https://www.visa.cn/";
             runMinutes = "30";
             updateIPList = "false";
 #else
@@ -68,6 +76,8 @@ namespace CloudflareFastCDN
     domains = Environment.GetEnvironmentVariable("DOMAINS");
     pingThreads = Environment.GetEnvironmentVariable("PING_THREADS");
     maxIps = Environment.GetEnvironmentVariable("MAX_IPS");
+    pingIntervalMs = Environment.GetEnvironmentVariable("PING_INTERVAL_MS");
+    httpProbeUrl = Environment.GetEnvironmentVariable("HTTP_PROBE_URL");
     runMinutes = Environment.GetEnvironmentVariable("RUN_MINUTES");
     updateIPList = Environment.GetEnvironmentVariable("UPDATE_IP_LIST");
 #endif
@@ -79,11 +89,13 @@ namespace CloudflareFastCDN
                 domains = parameters.GetValueOrDefault("DOMAINS", domains);
                 pingThreads = parameters.GetValueOrDefault("PING_THREADS", pingThreads);
                 maxIps = parameters.GetValueOrDefault("MAX_IPS", maxIps);
+                pingIntervalMs = parameters.GetValueOrDefault("PING_INTERVAL_MS", pingIntervalMs);
+                httpProbeUrl = parameters.GetValueOrDefault("HTTP_PROBE_URL", httpProbeUrl);
                 runMinutes = parameters.GetValueOrDefault("RUN_MINUTES", runMinutes);
                 updateIPList = parameters.GetValueOrDefault("UPDATE_IP_LIST", updateIPList);
             }
 
-            return (cfKey, domains, pingThreads, maxIps, runMinutes, updateIPList);
+            return (cfKey, domains, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, runMinutes, updateIPList);
         }
 
 
@@ -167,59 +179,52 @@ namespace CloudflareFastCDN
 
             //TODO 精简检测的IP数量
 
-            IcmpPing task = new IcmpPing(ipAddresses);
-            Console.WriteLine($"开始第1轮检查：全量4次Ping");
-            // 先全部执行4ping
-            var a = task.RunAsync().Result;
-            var topPings = a.Where(a => a.Sended == 4 && a.Received == a.Sended).ToList();
+            IcmpPing task = new IcmpPing(ipAddresses, FirstRoundPingCount);
+            Console.WriteLine($"开始第1轮检查：全量{FirstRoundPingCount}次Ping");
+            // 先全部执行首轮 ping
+            var a = await task.RunAsync();
+            var topPings = a.Where(a => a.Sended == FirstRoundPingCount && a.Received == a.Sended).ToList();
             var top100Pings = topPings.Take(100);
 
-            Console.WriteLine($"开始第2轮检查：Top100,10次Ping");
-            // 对前100再次10ping
-            IcmpPing task100 = new IcmpPing(top100Pings.Select(a => a.IP).ToList(), 10);
-            var b = task100.RunAsync().Result;
-            var top100PingsSelect = b.Where(a => a.Sended == 10 && a.Received == a.Sended).ToList();
-
-            Console.WriteLine($"开始第3轮检查：Top100精选后,{FinalPingCount}次Ping，允许最多丢包{FinalStageMaxPacketLoss}/{FinalPingCount}");
-            // 再进行一次 20ping，最终阶段允许少量丢包
-            IcmpPing taskLast = new IcmpPing(top100PingsSelect.Select(a => a.IP).ToList(), FinalPingCount);
-            var c = taskLast.RunAsync().Result;
-            var topLastPingsSelect = c
-                .Where(a => a.Sended == FinalPingCount && a.Sended - a.Received <= FinalStageMaxPacketLoss)
+            Console.WriteLine($"开始第2轮检查：Top100,{SecondRoundPingCount}次Ping，允许最多丢包{SecondRoundMaxPacketLoss}/{SecondRoundPingCount}");
+            // 对前100再次 10 ping
+            IcmpPing task100 = new IcmpPing(top100Pings.Select(a => a.IP).ToList(), SecondRoundPingCount);
+            var b = await task100.RunAsync();
+            var top100PingsSelect = b
+                .Where(a => a.Sended == SecondRoundPingCount && a.Sended - a.Received <= SecondRoundMaxPacketLoss)
                 .ToList();
 
-            if (!topLastPingsSelect.Any())
+            var httpCandidates = top100PingsSelect.Take(HttpCandidateCount).ToList();
+            if (!httpCandidates.Any())
             {
-                Console.WriteLine($"最终阶段没有IP通过：要求丢包不超过{FinalStageMaxPacketLoss}/{FinalPingCount}");
+                Console.WriteLine("第二轮后没有IP进入HTTP验证阶段");
                 return;
             }
 
-            //检查看看前5个是不是通的
-            Console.WriteLine($"开始最终检查：HTTP协议是否通畅");
+            Console.WriteLine($"开始最终检查：前{HttpCandidateCount}个候选IP进行HTTP验证，每个IP检测{HttpProbeCount}次，至少成功{HttpMinSuccessCount}次");
             int count = 0;
-            List<PingData> top5List = new List<PingData>();
+            List<PingData> topHttpList = new List<PingData>();
             var httpPing = new Httping();
-            foreach (var ip in topLastPingsSelect)
+            foreach (var ip in httpCandidates)
             {
                 count++;
-                var pingResult = await httpPing.SinglePing(ip.IP);
-                Console.WriteLine($"最终结果 [{count}] {ip.IP} HTTP畅通：{pingResult.success} HTTP延时：{pingResult.delay.TotalMilliseconds}ms");
-                if (pingResult.success)
-                {
-                    ip.Delay = pingResult.delay;
-                    top5List.Add(ip);
-                }
+                var pingResult = await httpPing.Ping(ip.IP, HttpProbeCount);
+                var averageDelay = pingResult.success > 0
+                    ? TimeSpan.FromMilliseconds(pingResult.totalDelay.TotalMilliseconds / pingResult.success)
+                    : TimeSpan.Zero;
 
-                if (count >= 5)
+                Console.WriteLine($"最终结果 [{count}] {ip.IP} HTTP成功：{pingResult.success}/{HttpProbeCount} HTTP均延时：{averageDelay.TotalMilliseconds}ms");
+                if (pingResult.success >= HttpMinSuccessCount)
                 {
-                    break;
+                    ip.Delay = averageDelay;
+                    topHttpList.Add(ip);
                 }
             }
 
             //在其中选择一个最好的结果
-            top5List.Sort((a, b) => a.Delay.TotalMicroseconds.CompareTo(b.Delay.TotalMicroseconds));
+            topHttpList.Sort((a, b) => a.Delay.TotalMicroseconds.CompareTo(b.Delay.TotalMicroseconds));
 
-            PingData top1Data = top5List.FirstOrDefault();
+            PingData top1Data = topHttpList.FirstOrDefault();
 
             if (top1Data != null)
             {

@@ -12,7 +12,6 @@ namespace CloudflareFastCDN.Utils
     public class IcmpPing
     {
         private const int PingTimeout = 1000;
-        private const int MaxRoutine = 1000;
 
         private static int Threads = AppConfig.PingThreads;
         private static int PingCount = 4;
@@ -86,6 +85,11 @@ namespace CloudflareFastCDN.Utils
                 {
                     recv++;
                     totalDelay += delay;
+                }
+
+                if (i < PingCount - 1 && AppConfig.PingIntervalMs > 0)
+                {
+                    await Task.Delay(AppConfig.PingIntervalMs);
                 }
             }
 

@@ -19,6 +19,9 @@ namespace CloudflareFastCDN.Utils
 
         public static int MaxIps { get; set; } = 400;
 
+        public static int PingIntervalMs { get; set; } = 150;
+
+        public static string HttpProbeUrl { get; set; } = "https://www.visa.cn/";
 
         public static int RunMinutes { get; set; } = 30;
 

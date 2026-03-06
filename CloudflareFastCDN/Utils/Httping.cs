@@ -7,19 +7,18 @@ namespace CloudflareFastCDN.Utils
 {
     public class Httping
     {
-        private const int PingCount = 4;
+        private const string DefaultProbeUrl = "https://www.visa.cn/";
         private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(4);
-        private static readonly Uri ProbeUri = new("https://www.visa.cn/");
         private static readonly string UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
 
-        public async Task<(int, TimeSpan)> Ping(IPAddress ip)
+        public async Task<(int success, TimeSpan totalDelay)> Ping(IPAddress ip, int pingCount = 3)
         {
             using var client = CreateClient(ip);
 
             int success = 0;
             TimeSpan totalDelay = TimeSpan.Zero;
 
-            for (int i = 0; i < PingCount; i++)
+            for (int i = 0; i < pingCount; i++)
             {
                 var pingResult = await SendProbeAsync(client);
                 if (!pingResult.success)
@@ -85,7 +84,7 @@ namespace CloudflareFastCDN.Utils
 
         private static async Task<(bool success, TimeSpan delay, HttpStatusCode statusCode)> SendAsync(HttpClient client, HttpMethod method)
         {
-            using var request = new HttpRequestMessage(method, ProbeUri);
+            using var request = new HttpRequestMessage(method, GetProbeUri());
             var stopwatch = Stopwatch.StartNew();
 
             try
@@ -117,6 +116,13 @@ namespace CloudflareFastCDN.Utils
         {
             var numericCode = (int)statusCode;
             return numericCode >= 200 && numericCode < 400;
+        }
+
+        private static Uri GetProbeUri()
+        {
+            return Uri.TryCreate(AppConfig.HttpProbeUrl, UriKind.Absolute, out var probeUri)
+                ? probeUri
+                : new Uri(DefaultProbeUrl);
         }
     }
 }
