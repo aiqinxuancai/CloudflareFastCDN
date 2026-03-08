@@ -11,7 +11,7 @@
 编译后可通过命令行参数启动：
 
 ```bash
-CloudflareFastCDN --CLOUDFLARE_KEY=你的CFToken --DOMAINS=cdn.example.com,cdn2.example.com --PING_THREADS=16 --MAX_IPS=400 --PING_INTERVAL_MS=150 --HTTP_PROBE_URL=https://www.visa.cn/ --RUN_MINUTES=30 --UPDATE_IP_LIST=false
+CloudflareFastCDN --CLOUDFLARE_KEY=你的CFToken --DOMAINS=cdn.example.com,cdn2.example.com --PING_THREADS=8 --MAX_IPS=400 --PING_INTERVAL_MS=150 --HTTP_PROBE_URL=https://www.visa.cn/ --RUN_MINUTES=30 --UPDATE_IP_LIST=false
 ```
 
 ### Docker 运行
@@ -22,7 +22,7 @@ docker run -d \
   --restart unless-stopped \
   -e CLOUDFLARE_KEY=你的CLOUDFLARE_KEY \
   -e DOMAINS=cdn.example.com,cdn2.example.com \
-  -e PING_THREADS=16 \
+  -e PING_THREADS=8 \
   -e MAX_IPS=400 \
   -e PING_INTERVAL_MS=150 \
   -e HTTP_PROBE_URL=https://www.visa.cn/ \
@@ -46,7 +46,7 @@ services:
     environment:
       CLOUDFLARE_KEY: "你的CLOUDFLARE_KEY"
       DOMAINS: "cdn.example.com,cdn2.example.com"
-      PING_THREADS: "16"
+      PING_THREADS: "8"
       MAX_IPS: "400"
       PING_INTERVAL_MS: "150"
       HTTP_PROBE_URL: "https://www.visa.cn/"
@@ -80,7 +80,7 @@ docker compose down
 | --- | --- | --- | --- |
 | **`CLOUDFLARE_KEY`** | **是** | 无 | Cloudflare API Token，需要具备目标域名对应 Zone 的 DNS 编辑权限。 |
 | **`DOMAINS`** | **是** | 无 | 需要更新 A 记录的域名，多个域名用英文逗号分隔，例如 `cdn.example.com,cdn2.example.com`。 |
-| `PING_THREADS` | 否 | `16` | Ping 并发线程数。数值越大检测越快，但过高可能导致丢包率上升。 |
+| `PING_THREADS` | 否 | `8` | Ping 并发线程数。数值越大检测越快，但过高可能导致丢包率上升。 |
 | `MAX_IPS` | 否 | `400` | 本轮最多抽样检测的 IP 数量。程序会先按网段抽取，再从中随机采样。 |
 | `PING_INTERVAL_MS` | 否 | `150` | 单次 Ping 的间隔时间，单位毫秒。 |
 | `HTTP_PROBE_URL` | 否 | `https://www.visa.cn/` | HTTP 验证阶段访问的测试地址。建议使用稳定、可正常访问的 HTTPS 地址。 |

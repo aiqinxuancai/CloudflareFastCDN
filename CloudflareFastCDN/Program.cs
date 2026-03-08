@@ -38,7 +38,7 @@ namespace CloudflareFastCDN
 
             AppConfig.CloudflareKey = config.CloudflareKey;
             AppConfig.Domains = config.Domains.Split(',');
-            AppConfig.PingThreads = ParseWithDefault(config.PingThreads, 16);
+            AppConfig.PingThreads = ParseWithDefault(config.PingThreads, 8);
             AppConfig.MaxIps = ParseWithDefault(config.MaxIps, 400);
             AppConfig.PingIntervalMs = ParseWithDefault(config.PingIntervalMs, 150);
             AppConfig.HttpProbeUrl = string.IsNullOrWhiteSpace(config.HttpProbeUrl) ? "https://www.visa.cn/" : config.HttpProbeUrl.Trim();
@@ -65,7 +65,7 @@ namespace CloudflareFastCDN
 #if DEBUG
             cfKey = File.ReadAllText("CLOUDFLARE_KEY.txt");
             domains = File.ReadAllText("DOMAINS.txt");
-            pingThreads = "16";
+            pingThreads = "8";
             maxIps = "400";
             pingIntervalMs = "150";
             httpProbeUrl = "https://www.visa.cn/";
