@@ -43,8 +43,10 @@ namespace CloudflareFastCDN
             AppConfig.PingIntervalMs = ParseWithDefault(config.PingIntervalMs, 150);
             AppConfig.HttpProbeUrl = string.IsNullOrWhiteSpace(config.HttpProbeUrl) ? "https://www.visa.cn/" : config.HttpProbeUrl.Trim();
             AppConfig.RunMinutes = ParseWithDefault(config.RunMinutes, 30);
-            AppConfig.SelectionPriority = NormalizeSelectionPriority(config.SelectionPriority);
+            AppConfig.BandwidthPriority = ParseWithDefault(config.BandwidthPriority, false);
             AppConfig.UpdateIPList = ParseWithDefault(config.UpdateIPList, false);
+
+            PrintStartupConfiguration(isDocker);
 
             if (AppConfig.UpdateIPList)
             {
@@ -59,9 +61,9 @@ namespace CloudflareFastCDN
             }
         }
 
-        static (string CloudflareKey, string Domains, string PingThreads, string MaxIps, string PingIntervalMs, string HttpProbeUrl, string RunMinutes, string SelectionPriority, string UpdateIPList) LoadConfiguration(string[] args, bool isDocker)
+        static (string CloudflareKey, string Domains, string PingThreads, string MaxIps, string PingIntervalMs, string HttpProbeUrl, string RunMinutes, string BandwidthPriority, string UpdateIPList) LoadConfiguration(string[] args, bool isDocker)
         {
-            string cfKey, domains, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, runMinutes, selectionPriority, updateIPList;
+            string cfKey, domains, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, runMinutes, bandwidthPriority, updateIPList;
 
 #if DEBUG
             cfKey = File.ReadAllText("CLOUDFLARE_KEY.txt");
@@ -71,7 +73,7 @@ namespace CloudflareFastCDN
             pingIntervalMs = "150";
             httpProbeUrl = "https://www.visa.cn/";
             runMinutes = "30";
-            selectionPriority = "latency";
+            bandwidthPriority = "false";
             updateIPList = "false";
 #else
     cfKey = Environment.GetEnvironmentVariable("CLOUDFLARE_KEY");
@@ -81,7 +83,7 @@ namespace CloudflareFastCDN
     pingIntervalMs = Environment.GetEnvironmentVariable("PING_INTERVAL_MS");
     httpProbeUrl = Environment.GetEnvironmentVariable("HTTP_PROBE_URL");
     runMinutes = Environment.GetEnvironmentVariable("RUN_MINUTES");
-    selectionPriority = Environment.GetEnvironmentVariable("SELECTION_PRIORITY");
+    bandwidthPriority = Environment.GetEnvironmentVariable("BANDWIDTH_PRIORITY");
     updateIPList = Environment.GetEnvironmentVariable("UPDATE_IP_LIST");
 #endif
 
@@ -95,11 +97,11 @@ namespace CloudflareFastCDN
                 pingIntervalMs = parameters.GetValueOrDefault("PING_INTERVAL_MS", pingIntervalMs);
                 httpProbeUrl = parameters.GetValueOrDefault("HTTP_PROBE_URL", httpProbeUrl);
                 runMinutes = parameters.GetValueOrDefault("RUN_MINUTES", runMinutes);
-                selectionPriority = parameters.GetValueOrDefault("SELECTION_PRIORITY", selectionPriority);
+                bandwidthPriority = parameters.GetValueOrDefault("BANDWIDTH_PRIORITY", bandwidthPriority);
                 updateIPList = parameters.GetValueOrDefault("UPDATE_IP_LIST", updateIPList);
             }
 
-            return (cfKey, domains, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, runMinutes, selectionPriority, updateIPList);
+            return (cfKey, domains, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, runMinutes, bandwidthPriority, updateIPList);
         }
 
 
@@ -142,25 +144,23 @@ namespace CloudflareFastCDN
             return parameters;
         }
 
-        private static string NormalizeSelectionPriority(string value)
+        private static void PrintStartupConfiguration(bool isDocker)
         {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return "latency";
-            }
+            var maskedKey = string.IsNullOrWhiteSpace(AppConfig.CloudflareKey)
+                ? "(empty)"
+                : $"{AppConfig.CloudflareKey[..Math.Min(4, AppConfig.CloudflareKey.Length)]}***";
 
-            return value.Trim().ToLowerInvariant() switch
-            {
-                "bandwidth" => "bandwidth",
-                "throughput" => "bandwidth",
-                "带宽" => "bandwidth",
-                "latency" => "latency",
-                "connection" => "latency",
-                "speed" => "latency",
-                "链接速度" => "latency",
-                "连接速度" => "latency",
-                _ => "latency"
-            };
+            Console.WriteLine("启动配置：");
+            Console.WriteLine($"  运行环境: {(isDocker ? "Docker" : "Local")}");
+            Console.WriteLine($"  CLOUDFLARE_KEY: {maskedKey}");
+            Console.WriteLine($"  DOMAINS: {string.Join(",", AppConfig.Domains)}");
+            Console.WriteLine($"  PING_THREADS: {AppConfig.PingThreads}");
+            Console.WriteLine($"  MAX_IPS: {AppConfig.MaxIps}");
+            Console.WriteLine($"  PING_INTERVAL_MS: {AppConfig.PingIntervalMs}");
+            Console.WriteLine($"  HTTP_PROBE_URL: {AppConfig.HttpProbeUrl}");
+            Console.WriteLine($"  RUN_MINUTES: {AppConfig.RunMinutes}");
+            Console.WriteLine($"  BANDWIDTH_PRIORITY: {AppConfig.BandwidthPriority}");
+            Console.WriteLine($"  UPDATE_IP_LIST: {AppConfig.UpdateIPList}");
         }
 
         /// <summary>
@@ -226,7 +226,7 @@ namespace CloudflareFastCDN
                 return;
             }
 
-            Console.WriteLine($"开始最终检查：前{HttpCandidateCount}个候选IP进行HTTP验证，每个IP检测{HttpProbeCount}次，至少成功{HttpMinSuccessCount}次，当前模式：{AppConfig.SelectionPriority}");
+            Console.WriteLine($"开始最终检查：前{HttpCandidateCount}个候选IP进行HTTP验证，每个IP检测{HttpProbeCount}次，至少成功{HttpMinSuccessCount}次，当前模式：{(AppConfig.BandwidthPriority ? "带宽优先" : "延迟优先")}");
             int count = 0;
             List<PingData> topHttpList = new List<PingData>();
             var httpPing = new Httping();
@@ -249,7 +249,7 @@ namespace CloudflareFastCDN
             PingData? top1Data;
             if (topHttpList.Any())
             {
-                if (!AppConfig.IsBandwidthPriority)
+                if (!AppConfig.BandwidthPriority)
                 {
                     topHttpList.Sort((a, b) => a.Delay.TotalMicroseconds.CompareTo(b.Delay.TotalMicroseconds));
                     top1Data = topHttpList.FirstOrDefault();
