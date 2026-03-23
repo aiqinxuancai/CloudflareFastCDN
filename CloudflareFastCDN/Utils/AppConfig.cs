@@ -25,6 +25,10 @@ namespace CloudflareFastCDN.Utils
 
         public static int RunMinutes { get; set; } = 30;
 
+        public static string SelectionPriority { get; set; } = "latency";
+
+        public static bool IsBandwidthPriority =>
+            string.Equals(SelectionPriority, "bandwidth", StringComparison.OrdinalIgnoreCase);
 
         public static bool UpdateIPList { get; set; } = false;
 

@@ -8,7 +8,9 @@ namespace CloudflareFastCDN.Utils
     public class Httping
     {
         private const string DefaultProbeUrl = "https://www.visa.cn/";
-        private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(4);
+        private const int DefaultSpeedTestBytes = 4 * 1024 * 1024;
+        private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(4);
+        private static readonly TimeSpan SpeedTestTimeout = TimeSpan.FromSeconds(10);
         private static readonly string UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
 
         public async Task<(int success, TimeSpan totalDelay)> Ping(IPAddress ip, int pingCount = 3)
@@ -39,12 +41,23 @@ namespace CloudflareFastCDN.Utils
             return await SendProbeAsync(client);
         }
 
+        public async Task<(bool success, bool missing, double mbps, long bytesRead, TimeSpan duration)> SpeedTest(IPAddress ip, int maxBytes = DefaultSpeedTestBytes)
+        {
+            using var client = CreateClient(ip, SpeedTestTimeout);
+            return await DownloadSpeedTestAsync(client, maxBytes);
+        }
+
         private static HttpClient CreateClient(IPAddress ip)
+        {
+            return CreateClient(ip, ProbeTimeout);
+        }
+
+        private static HttpClient CreateClient(IPAddress ip, TimeSpan timeout)
         {
             var handler = new SocketsHttpHandler
             {
                 AllowAutoRedirect = false,
-                ConnectTimeout = Timeout,
+                ConnectTimeout = timeout,
                 ConnectCallback = async (context, cancellationToken) =>
                 {
                     var socket = new Socket(ip.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
@@ -64,7 +77,7 @@ namespace CloudflareFastCDN.Utils
 
             var client = new HttpClient(handler)
             {
-                Timeout = Timeout,
+                Timeout = timeout,
             };
             client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
             return client;
@@ -107,6 +120,58 @@ namespace CloudflareFastCDN.Utils
             }
         }
 
+        private static async Task<(bool success, bool missing, double mbps, long bytesRead, TimeSpan duration)> DownloadSpeedTestAsync(HttpClient client, int maxBytes)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, GetSpeedTestUri());
+
+            try
+            {
+                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                if (response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    return (false, true, 0, 0, TimeSpan.Zero);
+                }
+
+                if (response.StatusCode != HttpStatusCode.OK)
+                {
+                    Debug.WriteLine($"Speed test failed, status code: {(int)response.StatusCode}");
+                    return (false, false, 0, 0, TimeSpan.Zero);
+                }
+
+                using var stream = await response.Content.ReadAsStreamAsync();
+                byte[] buffer = new byte[64 * 1024];
+                long totalBytesRead = 0;
+                var stopwatch = Stopwatch.StartNew();
+
+                while (totalBytesRead < maxBytes)
+                {
+                    var bytesToRead = (int)Math.Min(buffer.Length, maxBytes - totalBytesRead);
+                    var read = await stream.ReadAsync(buffer.AsMemory(0, bytesToRead));
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    totalBytesRead += read;
+                }
+
+                stopwatch.Stop();
+
+                if (totalBytesRead <= 0 || stopwatch.Elapsed <= TimeSpan.Zero)
+                {
+                    return (false, false, 0, totalBytesRead, stopwatch.Elapsed);
+                }
+
+                var mbps = totalBytesRead * 8d / stopwatch.Elapsed.TotalSeconds / 1_000_000d;
+                return (true, false, mbps, totalBytesRead, stopwatch.Elapsed);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine(ex);
+                return (false, false, 0, 0, TimeSpan.Zero);
+            }
+        }
+
         private static bool ShouldFallbackToGet(HttpStatusCode statusCode)
         {
             return statusCode == HttpStatusCode.MethodNotAllowed || statusCode == HttpStatusCode.NotImplemented;
@@ -123,6 +188,11 @@ namespace CloudflareFastCDN.Utils
             return Uri.TryCreate(AppConfig.HttpProbeUrl, UriKind.Absolute, out var probeUri)
                 ? probeUri
                 : new Uri(DefaultProbeUrl);
+        }
+
+        private static Uri GetSpeedTestUri()
+        {
+            return new Uri(GetProbeUri(), "/speedtest");
         }
     }
 }

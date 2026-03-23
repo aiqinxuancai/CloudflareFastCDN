@@ -1,33 +1,59 @@
 # CloudflareFastCDN
-使用CF公开的子网，每个`IP/24子网`中拿一个IP，然后进行**多轮ICMPPing**来筛选最快速和稳定的IP并通过API更新CF的A记录。
 
-仅支持IPv4，不测IP的下载带宽，在家里的docker上跑了几天，效果良好。
+使用 Cloudflare 公布的 IPv4 网段，从每个 `/24` 子网中抽取一个 IP，经过多轮 ICMP Ping 和 HTTP 验证后，自动把最优 IP 更新到 Cloudflare DNS A 记录。
 
-## 如何使用
+目前仅支持 IPv4。
+
+## 工作流程
+
+1. 从 Cloudflare IPv4 网段中抽样出待测 IP。
+2. 第 1 轮对全部候选做 4 次 ICMP Ping。
+3. 第 2 轮对前 100 个结果做 10 次 ICMP Ping，进一步筛掉丢包较高的 IP。
+4. 对前 10 个候选做 HTTP 验证。
+5. 根据 `SELECTION_PRIORITY` 决定最终挑选方式：
+   - `latency`：只按 HTTP 延迟最小选择，保持旧逻辑。
+   - `bandwidth`：在 HTTP 验证通过后，尝试访问 `HTTP_PROBE_URL` 同域名下的 `/speedtest` 文件并做下载测速，优先选择带宽最高的 IP。
+6. 如果 `bandwidth` 模式下 `/speedtest` 不存在或全部测速失败，则自动回退到旧的 HTTP 延迟逻辑。
+
+## 运行方式
 
 ### 直接运行
-编译后执行参数，例子：
-```
-CloudflareFastCDN --CLOUDFLARE_KEY=你的CFKEY --DOMAINS=cdn.xxx.com,cdn.hahaha.com --PING_THREADS=16 --MAX_IPS=400 --RUN_MINUTES=30 --UPDATE_IP_LIST=false
+
+编译后执行：
+
+```bash
+CloudflareFastCDN \
+  --CLOUDFLARE_KEY=你的CFKEY \
+  --DOMAINS=cdn.example.com,cdn2.example.com \
+  --PING_THREADS=16 \
+  --MAX_IPS=400 \
+  --PING_INTERVAL_MS=150 \
+  --HTTP_PROBE_URL=https://www.visa.cn/ \
+  --RUN_MINUTES=30 \
+  --SELECTION_PRIORITY=latency \
+  --UPDATE_IP_LIST=false
 ```
 
-### Docker运行
-使用Docker命令直接运行：
+### Docker 运行
+
 ```bash
 docker run -d \
   --name cloudflare-fast-cdn \
   --restart unless-stopped \
   -e CLOUDFLARE_KEY=你的CLOUDFLARE_KEY \
-  -e DOMAINS=你要更新A记录的域名 \
+  -e DOMAINS=cdn.example.com,cdn2.example.com \
   -e PING_THREADS=16 \
   -e MAX_IPS=400 \
+  -e PING_INTERVAL_MS=150 \
+  -e HTTP_PROBE_URL=https://www.visa.cn/ \
   -e RUN_MINUTES=30 \
+  -e SELECTION_PRIORITY=latency \
   -e UPDATE_IP_LIST=false \
   aiqinxuancai/cloudfarefastcdn:latest
 ```
 
-### Docker Compose运行
-创建 `docker-compose.yml` 文件：
+### Docker Compose
+
 ```yaml
 version: '3.8'
 
@@ -37,40 +63,77 @@ services:
     container_name: cloudflare-fast-cdn
     restart: unless-stopped
     environment:
-      # 必填项
       CLOUDFLARE_KEY: "你的CLOUDFLARE_KEY"
       DOMAINS: "cdn.example.com,cdn2.example.com"
-
-      # 可选项（以下为默认值）
       PING_THREADS: "16"
       MAX_IPS: "400"
+      PING_INTERVAL_MS: "150"
+      HTTP_PROBE_URL: "https://www.visa.cn/"
       RUN_MINUTES: "30"
+      SELECTION_PRIORITY: "latency"
       UPDATE_IP_LIST: "false"
 ```
 
 启动服务：
+
 ```bash
 docker-compose up -d
 ```
 
 查看日志：
+
 ```bash
 docker-compose logs -f cloudflare-fast-cdn
 ```
 
 停止服务：
+
 ```bash
 docker-compose down
 ```
 
-### 变量解释
-* **CLOUDFLARE_KEY** #必填，请自行获取，必须有你要使用的域名的DNS区域编辑权限。
-* **DOMAINS** #必填，使用半角逗号分割，将需要更新A记录的域名写出来，比如cdn.a.com,cdn2.a.com。
-* **PING_THREADS** #ping的线程数，默认是16，如果CPU性能很高，可适当调高，**过高可能导致丢包率大幅提升**，我设置10在N100上没问题，在13900HK上可以开到200.
-* **MAX_IPS** #最多选取多少个IP来进行测试，会在网段中选取IP后再从中均匀随机获取。
-* **RUN_MINUTES** #运行间隔分钟，默认30分钟一次。
-* **UPDATE_IP_LIST** #启动时更新CF的官方IPv4列表，默认为false
+## 环境变量说明
 
+- `CLOUDFLARE_KEY`
+  Cloudflare API Token。必须具备目标域名所在 Zone 的 DNS 编辑权限。
+
+- `DOMAINS`
+  需要自动更新 A 记录的域名，多个域名用英文逗号分隔。
+
+- `PING_THREADS`
+  Ping 并发数，默认 `16`。
+
+- `MAX_IPS`
+  每轮最多抽样检测多少个 IP，默认 `400`。
+
+- `PING_INTERVAL_MS`
+  Ping 间隔，默认 `150` 毫秒。
+
+- `HTTP_PROBE_URL`
+  HTTP 验证使用的目标 URL，默认 `https://www.visa.cn/`。
+  在 `bandwidth` 模式下，程序会自动尝试访问该 URL 所在域名下的 `/speedtest`，例如 `https://www.visa.cn/speedtest`。
+
+- `RUN_MINUTES`
+  每轮运行间隔分钟数，默认 `30`。
+
+- `SELECTION_PRIORITY`
+  最终优选策略，默认 `latency`。
+  可选值：
+  - `latency`
+    连接速度优先，只按 HTTP 延迟最小选择，不访问 `/speedtest`。
+  - `bandwidth`
+    带宽优先，先做 HTTP 验证，再尝试下载 `/speedtest` 进行测速，按带宽最高选择。
+    如果 `/speedtest` 不存在或测速失败，会自动回退到 `latency` 逻辑。
+
+- `UPDATE_IP_LIST`
+  启动时是否更新 Cloudflare 官方 IPv4 列表，默认 `false`。
+
+## `/speedtest` 使用建议
+
+- 建议准备一个静态测速文件，路径固定为 `/speedtest`。
+- 建议文件大小至少 `4 MB` 以上，这样在高速链路下结果更稳定。
+- 如果没有准备 `/speedtest` 文件，也不影响使用，程序会自动退回 HTTP 延迟优选。
 
 ## 免责声明
-本项目本质是一个批量Ping的命令行工具，没有过量请求造成网络攻击的代码逻辑，不提供任何互联网服务，未特地或有偿的提供给任何人，也没有任何侵入计算机系统、修改带有版权的软件及系统软件等行为，均为使用者自愿下载使用，造成任何后果与本项目无关。
+
+本项目本质上是一个批量探测 Cloudflare 公网 IP 的命令行工具，不提供任何网络攻击能力，也不会主动提供互联网服务。请使用者自行判断使用场景及风险，项目作者不对使用本项目造成的任何后果负责。

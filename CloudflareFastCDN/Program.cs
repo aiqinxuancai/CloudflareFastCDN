@@ -43,6 +43,7 @@ namespace CloudflareFastCDN
             AppConfig.PingIntervalMs = ParseWithDefault(config.PingIntervalMs, 150);
             AppConfig.HttpProbeUrl = string.IsNullOrWhiteSpace(config.HttpProbeUrl) ? "https://www.visa.cn/" : config.HttpProbeUrl.Trim();
             AppConfig.RunMinutes = ParseWithDefault(config.RunMinutes, 30);
+            AppConfig.SelectionPriority = NormalizeSelectionPriority(config.SelectionPriority);
             AppConfig.UpdateIPList = ParseWithDefault(config.UpdateIPList, false);
 
             if (AppConfig.UpdateIPList)
@@ -58,9 +59,9 @@ namespace CloudflareFastCDN
             }
         }
 
-        static (string CloudflareKey, string Domains, string PingThreads, string MaxIps, string PingIntervalMs, string HttpProbeUrl, string RunMinutes, string UpdateIPList) LoadConfiguration(string[] args, bool isDocker)
+        static (string CloudflareKey, string Domains, string PingThreads, string MaxIps, string PingIntervalMs, string HttpProbeUrl, string RunMinutes, string SelectionPriority, string UpdateIPList) LoadConfiguration(string[] args, bool isDocker)
         {
-            string cfKey, domains, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, runMinutes, updateIPList;
+            string cfKey, domains, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, runMinutes, selectionPriority, updateIPList;
 
 #if DEBUG
             cfKey = File.ReadAllText("CLOUDFLARE_KEY.txt");
@@ -70,6 +71,7 @@ namespace CloudflareFastCDN
             pingIntervalMs = "150";
             httpProbeUrl = "https://www.visa.cn/";
             runMinutes = "30";
+            selectionPriority = "latency";
             updateIPList = "false";
 #else
     cfKey = Environment.GetEnvironmentVariable("CLOUDFLARE_KEY");
@@ -79,6 +81,7 @@ namespace CloudflareFastCDN
     pingIntervalMs = Environment.GetEnvironmentVariable("PING_INTERVAL_MS");
     httpProbeUrl = Environment.GetEnvironmentVariable("HTTP_PROBE_URL");
     runMinutes = Environment.GetEnvironmentVariable("RUN_MINUTES");
+    selectionPriority = Environment.GetEnvironmentVariable("SELECTION_PRIORITY");
     updateIPList = Environment.GetEnvironmentVariable("UPDATE_IP_LIST");
 #endif
 
@@ -92,10 +95,11 @@ namespace CloudflareFastCDN
                 pingIntervalMs = parameters.GetValueOrDefault("PING_INTERVAL_MS", pingIntervalMs);
                 httpProbeUrl = parameters.GetValueOrDefault("HTTP_PROBE_URL", httpProbeUrl);
                 runMinutes = parameters.GetValueOrDefault("RUN_MINUTES", runMinutes);
+                selectionPriority = parameters.GetValueOrDefault("SELECTION_PRIORITY", selectionPriority);
                 updateIPList = parameters.GetValueOrDefault("UPDATE_IP_LIST", updateIPList);
             }
 
-            return (cfKey, domains, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, runMinutes, updateIPList);
+            return (cfKey, domains, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, runMinutes, selectionPriority, updateIPList);
         }
 
 
@@ -136,6 +140,27 @@ namespace CloudflareFastCDN
             }
 
             return parameters;
+        }
+
+        private static string NormalizeSelectionPriority(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return "latency";
+            }
+
+            return value.Trim().ToLowerInvariant() switch
+            {
+                "bandwidth" => "bandwidth",
+                "throughput" => "bandwidth",
+                "带宽" => "bandwidth",
+                "latency" => "latency",
+                "connection" => "latency",
+                "speed" => "latency",
+                "链接速度" => "latency",
+                "连接速度" => "latency",
+                _ => "latency"
+            };
         }
 
         /// <summary>
@@ -201,7 +226,7 @@ namespace CloudflareFastCDN
                 return;
             }
 
-            Console.WriteLine($"开始最终检查：前{HttpCandidateCount}个候选IP进行HTTP验证，每个IP检测{HttpProbeCount}次，至少成功{HttpMinSuccessCount}次");
+            Console.WriteLine($"开始最终检查：前{HttpCandidateCount}个候选IP进行HTTP验证，每个IP检测{HttpProbeCount}次，至少成功{HttpMinSuccessCount}次，当前模式：{AppConfig.SelectionPriority}");
             int count = 0;
             List<PingData> topHttpList = new List<PingData>();
             var httpPing = new Httping();
@@ -221,10 +246,71 @@ namespace CloudflareFastCDN
                 }
             }
 
-            //在其中选择一个最好的结果
-            topHttpList.Sort((a, b) => a.Delay.TotalMicroseconds.CompareTo(b.Delay.TotalMicroseconds));
+            PingData? top1Data;
+            if (topHttpList.Any())
+            {
+                if (!AppConfig.IsBandwidthPriority)
+                {
+                    topHttpList.Sort((a, b) => a.Delay.TotalMicroseconds.CompareTo(b.Delay.TotalMicroseconds));
+                    top1Data = topHttpList.FirstOrDefault();
 
-            PingData top1Data = topHttpList.FirstOrDefault();
+                    if (top1Data != null)
+                    {
+                        Console.WriteLine($"当前为连接速度优先，按HTTP延迟选择IP {top1Data.IP} {top1Data.Delay.TotalMilliseconds:0.00}ms");
+                    }
+                }
+                else
+                {
+                    var speedRankedList = new List<(PingData data, double mbps, long bytesRead, TimeSpan duration)>();
+                    foreach (var ip in topHttpList)
+                    {
+                        var speedResult = await httpPing.SpeedTest(ip.IP);
+                        if (!speedResult.success)
+                        {
+                            if (speedResult.missing)
+                            {
+                                Console.WriteLine($"测速文件不存在，跳过下载测速 {ip.IP} /speedtest");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"下载测速失败 {ip.IP}");
+                            }
+
+                            continue;
+                        }
+
+                        speedRankedList.Add((ip, speedResult.mbps, speedResult.bytesRead, speedResult.duration));
+                        Console.WriteLine($"下载测速 [{speedRankedList.Count}] {ip.IP} 速度：{speedResult.mbps:0.00} Mbps 已下载：{speedResult.bytesRead / 1024d / 1024d:0.00} MB 用时：{speedResult.duration.TotalMilliseconds:0}ms");
+                    }
+
+                    if (speedRankedList.Any())
+                    {
+                        speedRankedList.Sort((a, b) =>
+                        {
+                            var speedCompare = b.mbps.CompareTo(a.mbps);
+                            return speedCompare != 0 ? speedCompare : a.data.Delay.CompareTo(b.data.Delay);
+                        });
+
+                        top1Data = speedRankedList[0].data;
+                        Console.WriteLine($"最终按下载带宽选择IP {top1Data.IP} {speedRankedList[0].mbps:0.00} Mbps");
+                    }
+                    else
+                    {
+                        // /speedtest 不存在或下载测速全部失败时，回退到原有 HTTP 延迟逻辑
+                        topHttpList.Sort((a, b) => a.Delay.TotalMicroseconds.CompareTo(b.Delay.TotalMicroseconds));
+                        top1Data = topHttpList.FirstOrDefault();
+
+                        if (top1Data != null)
+                        {
+                            Console.WriteLine($"下载测速不可用，回退到HTTP延迟选择IP {top1Data.IP} {top1Data.Delay.TotalMilliseconds:0.00}ms");
+                        }
+                    }
+                }
+            }
+            else
+            {
+                top1Data = null;
+            }
 
             if (top1Data != null)
             {
