@@ -1,43 +1,37 @@
-# 使用官方的 .NET SDK 镜像作为构建镜像
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 
-# 设置工作目录
-WORKDIR /app
+WORKDIR /src
 
-# 复制 csproj 并还原依赖项
-COPY *.csproj ./
-RUN dotnet restore
+COPY ["CloudflareFastCDN.csproj", "./"]
+RUN dotnet restore "CloudflareFastCDN.csproj"
 
-# 复制其余的项目文件
-COPY . ./
+COPY . .
+RUN dotnet publish "CloudflareFastCDN.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
-# 构建项目
-RUN dotnet publish -c Release -o out
-
-# 使用官方的 .NET 运行时镜像作为基础镜像
 FROM mcr.microsoft.com/dotnet/runtime:9.0 AS runtime
 
-# 设置工作目录
 WORKDIR /app
 
-# 复制已发布的文件到运行时镜像
-COPY --from=build /app/out .
+COPY --from=build /app/publish .
 
-# 声明构建参数
-ARG CLOUDFLARE_KEY
-ARG DOMAINS
-ARG PING_THREADS
-ARG MAX_IPS
-ARG RUN_MINUTES
-ARG UPDATE_IP_LIST
+ARG CLOUDFLARE_KEY=""
+ARG DOMAINS=""
+ARG PING_THREADS="8"
+ARG MAX_IPS="400"
+ARG PING_INTERVAL_MS="150"
+ARG HTTP_PROBE_URL="https://www.visa.cn/"
+ARG RUN_MINUTES="30"
+ARG BANDWIDTH_PRIORITY="false"
+ARG UPDATE_IP_LIST="false"
 
-# 使用构建参数设置环境变量
 ENV CLOUDFLARE_KEY=${CLOUDFLARE_KEY} \
+    DOMAINS=${DOMAINS} \
     PING_THREADS=${PING_THREADS} \
     MAX_IPS=${MAX_IPS} \
+    PING_INTERVAL_MS=${PING_INTERVAL_MS} \
+    HTTP_PROBE_URL=${HTTP_PROBE_URL} \
     RUN_MINUTES=${RUN_MINUTES} \
-    UPDATE_IP_LIST=${UPDATE_IP_LIST} \
-    DOMAINS=${DOMAINS}
+    BANDWIDTH_PRIORITY=${BANDWIDTH_PRIORITY} \
+    UPDATE_IP_LIST=${UPDATE_IP_LIST}
 
-# 设置启动命令
 ENTRYPOINT ["dotnet", "CloudflareFastCDN.dll"]
