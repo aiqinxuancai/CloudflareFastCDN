@@ -8,6 +8,7 @@ namespace CloudflareFastCDN.Utils
     {
         public string Subnet { get; set; }   // e.g. "104.16.1.0/24"
         public double DelayMs { get; set; }  // HTTP delay of the IP that discovered this subnet
+        public int ConsecutiveFailures { get; set; } = 0; // TcpPing failure streak from subnet cache phase
     }
 
     public class SubnetCache
@@ -126,6 +127,7 @@ namespace CloudflareFastCDN.Utils
             {
                 if (delayMs < existing.DelayMs)
                     existing.DelayMs = delayMs;
+                existing.ConsecutiveFailures = 0; // confirmed good again
                 _subnets.Sort((a, b) => a.DelayMs.CompareTo(b.DelayMs));
                 return;
             }
@@ -138,21 +140,64 @@ namespace CloudflareFastCDN.Utils
         }
 
         /// <summary>
-        /// Randomly samples one IP from each cached subnet, returning up to <paramref name="count"/> IPs total.
+        /// Randomly samples one IP from each cached subnet (up to <paramref name="count"/> subnets).
+        /// Returns (IP, Subnet) pairs so callers can correlate TcpPing results back to subnets.
         /// </summary>
-        public List<IPAddress> RandomSampleIPs(int count)
+        public List<(IPAddress IP, string Subnet)> RandomSampleIPs(int count)
         {
-            var result = new List<IPAddress>();
+            var result = new List<(IPAddress, string)>();
             var rng = new Random();
 
             foreach (var record in _subnets.Take(count))
             {
                 var ip = GetRandomIPFromSubnet24(record.Subnet, rng);
                 if (ip != null)
-                    result.Add(ip);
+                    result.Add((ip, record.Subnet));
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Updates consecutive-failure counters based on TcpPing results from the subnet cache phase.
+        /// Subnets whose sampled IP passed have their counter reset to 0.
+        /// Subnets whose sampled IP failed have their counter incremented; once it reaches
+        /// <paramref name="evictThreshold"/> they are evicted from the cache.
+        /// Returns true if any subnets were evicted.
+        /// </summary>
+        public bool RecordTcpPingOutcomes(
+            IEnumerable<(IPAddress IP, string Subnet)> sampled,
+            IEnumerable<IPAddress> passedIPs,
+            int evictThreshold = 3)
+        {
+            var passedSet = new HashSet<IPAddress>(passedIPs);
+            var toRemove = new List<string>();
+
+            foreach (var (ip, subnet) in sampled)
+            {
+                var record = _subnets.FirstOrDefault(s => s.Subnet == subnet);
+                if (record == null)
+                    continue;
+
+                if (passedSet.Contains(ip))
+                {
+                    record.ConsecutiveFailures = 0;
+                }
+                else
+                {
+                    record.ConsecutiveFailures++;
+                    if (record.ConsecutiveFailures >= evictThreshold)
+                    {
+                        toRemove.Add(subnet);
+                        Console.WriteLine($"子网缓存淘汰：{subnet} 连续{record.ConsecutiveFailures}次TCP Ping失败，已移除");
+                    }
+                }
+            }
+
+            foreach (var subnet in toRemove)
+                _subnets.RemoveAll(s => s.Subnet == subnet);
+
+            return toRemove.Count > 0;
         }
 
         private static IPAddress? GetRandomIPFromSubnet24(string subnet24, Random rng)

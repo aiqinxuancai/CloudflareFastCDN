@@ -227,14 +227,20 @@ namespace CloudflareFastCDN
             var httpCandidates = top100PingsSelect.Take(HttpCandidateCount).ToList();
 
             // 子网缓存阶段：从已缓存的/24子网中随机取IP进行TcpPing，通过的加入最终候选
-            var sampledSubnetIPs = subnetCache.RandomSampleIPs(SubnetSampleCount);
-            if (sampledSubnetIPs.Any())
+            var sampledSubnets = subnetCache.RandomSampleIPs(SubnetSampleCount);
+            if (sampledSubnets.Any())
             {
-                Console.WriteLine($"开始子网缓存阶段：从{subnetCache.SubnetCount}个缓存/24子网中随机取出{sampledSubnetIPs.Count}个IP进行TCP Ping验证");
-                TcpPing subnetTcpPing = new TcpPing(sampledSubnetIPs, SubnetProbePingCount);
+                Console.WriteLine($"开始子网缓存阶段：从{subnetCache.SubnetCount}个缓存/24子网中随机取出{sampledSubnets.Count}个IP进行TCP Ping验证");
+                TcpPing subnetTcpPing = new TcpPing(sampledSubnets.Select(s => s.IP).ToList(), SubnetProbePingCount);
                 var subnetResults = await subnetTcpPing.RunAsync();
                 var subnetPassed = subnetResults.Where(r => r.Received > 0).ToList();
-                Console.WriteLine($"子网缓存阶段：{subnetPassed.Count}/{sampledSubnetIPs.Count}个IP通过TCP Ping，加入最终候选");
+                Console.WriteLine($"子网缓存阶段：{subnetPassed.Count}/{sampledSubnets.Count}个IP通过TCP Ping，加入最终候选");
+
+                // 更新连续失败计数，淘汰连续3次失败的子网
+                bool evicted = subnetCache.RecordTcpPingOutcomes(sampledSubnets, subnetPassed.Select(r => r.IP));
+                if (evicted || subnetPassed.Count < sampledSubnets.Count)
+                    subnetCache.Save();
+
                 foreach (var passedIP in subnetPassed)
                 {
                     if (!httpCandidates.Any(c => c.IP.Equals(passedIP.IP)))
