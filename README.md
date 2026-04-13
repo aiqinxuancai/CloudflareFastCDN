@@ -9,11 +9,13 @@
 1. 从 Cloudflare IPv4 网段中抽样出待测 IP。
 2. 第 1 轮对全部候选做 4 次 ICMP Ping。
 3. 第 2 轮对前 100 个结果做 10 次 ICMP Ping，进一步筛掉丢包较高的 IP。
-4. 对前 10 个候选做 HTTP 验证。
-5. 根据 `BANDWIDTH_PRIORITY` 决定最终挑选方式：
+4. **子网缓存阶段**：从历史优选中积累的最多 10 个 `/24` 子网里各随机抽取 1 个 IP（共最多 10 个），进行 TCP Ping 连通性验证，通过的直接加入最终候选列表。子网缓存按 HTTP 延迟升序排序，持久化在 `subnet_cache.json`（Docker 下为 `/data/subnet_cache.json`）。
+5. 对候选 IP 做 HTTP 验证。
+6. 根据 `BANDWIDTH_PRIORITY` 决定最终挑选方式：
    - `false`：只按 HTTP 延迟最小选择，保持旧逻辑。
    - `true`：在 HTTP 验证通过后，尝试访问 `HTTP_PROBE_URL` 同域名下的 `/speedtest` 文件并做下载测速，优先选择带宽最高的 IP。
-6. 如果 `BANDWIDTH_PRIORITY=true` 时 `/speedtest` 不存在或全部测速失败，则自动回退到旧的 HTTP 延迟逻辑。
+7. 如果 `BANDWIDTH_PRIORITY=true` 时 `/speedtest` 不存在或全部测速失败，则自动回退到旧的 HTTP 延迟逻辑。
+8. 选出最优 IP 后，将其所在 `/24` 子网存入子网缓存（若 CF 对应 CIDR 覆盖完整 `/24`），供下次运行时优先验证。
 
 ## 使用方式
 
@@ -49,6 +51,7 @@ docker run -d \
   -e RUN_MINUTES=30 \
   -e BANDWIDTH_PRIORITY=false \
   -e UPDATE_IP_LIST=false \
+  -v cloudflare-fast-cdn-data:/data \
   aiqinxuancai/cloudfarefastcdn:latest
 ```
 
@@ -74,6 +77,11 @@ services:
       RUN_MINUTES: "30"
       BANDWIDTH_PRIORITY: "false"
       UPDATE_IP_LIST: "false"
+    volumes:
+      - cloudflare-fast-cdn-data:/data
+
+volumes:
+  cloudflare-fast-cdn-data:
 ```
 
 启动：

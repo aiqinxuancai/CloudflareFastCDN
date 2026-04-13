@@ -14,6 +14,8 @@ WORKDIR /app
 
 COPY --from=build /app/publish .
 
+RUN mkdir -p /data
+
 ARG CLOUDFLARE_KEY=""
 ARG DOMAINS=""
 ARG PING_THREADS="8"
@@ -35,3 +37,5 @@ ENV CLOUDFLARE_KEY=${CLOUDFLARE_KEY} \
     UPDATE_IP_LIST=${UPDATE_IP_LIST}
 
 ENTRYPOINT ["dotnet", "CloudflareFastCDN.dll"]
+
+VOLUME ["/data"]

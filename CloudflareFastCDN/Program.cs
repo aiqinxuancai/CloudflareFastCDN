@@ -13,6 +13,8 @@ namespace CloudflareFastCDN
         private const int HttpCandidateCount = 10;
         private const int HttpProbeCount = 3;
         private const int HttpMinSuccessCount = 2;
+        private const int SubnetProbePingCount = 2;
+        private const int SubnetSampleCount = 10;
 
         static void Main(string[] args)
         {
@@ -194,6 +196,9 @@ namespace CloudflareFastCDN
         {
             var processor = new IPProcessor();
 
+            var subnetCache = new SubnetCache();
+            subnetCache.Load();
+
             //更新IP
 
 
@@ -220,13 +225,30 @@ namespace CloudflareFastCDN
                 .ToList();
 
             var httpCandidates = top100PingsSelect.Take(HttpCandidateCount).ToList();
+
+            // 子网缓存阶段：从已缓存的/24子网中随机取IP进行TcpPing，通过的加入最终候选
+            var sampledSubnetIPs = subnetCache.RandomSampleIPs(SubnetSampleCount);
+            if (sampledSubnetIPs.Any())
+            {
+                Console.WriteLine($"开始子网缓存阶段：从{subnetCache.SubnetCount}个缓存/24子网中随机取出{sampledSubnetIPs.Count}个IP进行TCP Ping验证");
+                TcpPing subnetTcpPing = new TcpPing(sampledSubnetIPs, SubnetProbePingCount);
+                var subnetResults = await subnetTcpPing.RunAsync();
+                var subnetPassed = subnetResults.Where(r => r.Received > 0).ToList();
+                Console.WriteLine($"子网缓存阶段：{subnetPassed.Count}/{sampledSubnetIPs.Count}个IP通过TCP Ping，加入最终候选");
+                foreach (var passedIP in subnetPassed)
+                {
+                    if (!httpCandidates.Any(c => c.IP.Equals(passedIP.IP)))
+                        httpCandidates.Add(passedIP);
+                }
+            }
+
             if (!httpCandidates.Any())
             {
-                Console.WriteLine("第二轮后没有IP进入HTTP验证阶段");
+                Console.WriteLine("没有IP进入HTTP验证阶段");
                 return;
             }
 
-            Console.WriteLine($"开始最终检查：前{HttpCandidateCount}个候选IP进行HTTP验证，每个IP检测{HttpProbeCount}次，至少成功{HttpMinSuccessCount}次，当前模式：{(AppConfig.BandwidthPriority ? "带宽优先" : "延迟优先")}");
+            Console.WriteLine($"开始最终检查：{httpCandidates.Count}个候选IP进行HTTP验证，每个IP检测{HttpProbeCount}次，至少成功{HttpMinSuccessCount}次，当前模式：{(AppConfig.BandwidthPriority ? "带宽优先" : "延迟优先")}");
             int count = 0;
             List<PingData> topHttpList = new List<PingData>();
             var httpPing = new Httping();
@@ -314,6 +336,15 @@ namespace CloudflareFastCDN
 
             if (top1Data != null)
             {
+                // 缓存最优IP所在/24子网（按HTTP延迟排序存储，最多10条）
+                var subnet24 = subnetCache.GetSubnet24(top1Data.IP);
+                if (subnet24 != null)
+                {
+                    subnetCache.AddOrUpdate(subnet24, top1Data.Delay.TotalMilliseconds);
+                    subnetCache.Save();
+                    Console.WriteLine($"已缓存子网 {subnet24} (HTTP延迟 {top1Data.Delay.TotalMilliseconds:0.00}ms，当前共{subnetCache.SubnetCount}个缓存子网)");
+                }
+
                 //执行更新DNS
                 foreach (var domain in AppConfig.Domains)
                 {
