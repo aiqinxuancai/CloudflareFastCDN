@@ -39,7 +39,9 @@ namespace CloudflareFastCDN
             }
 
             AppConfig.CloudflareKey = config.CloudflareKey;
-            AppConfig.Domains = config.Domains.Split(',');
+            AppConfig.Domains = config.Domains.Split(',').Select(d => d.Trim()).Where(d => !string.IsNullOrEmpty(d)).ToArray();
+            AppConfig.Domains2 = string.IsNullOrWhiteSpace(config.Domains2) ? null : config.Domains2.Split(',').Select(d => d.Trim()).Where(d => !string.IsNullOrEmpty(d)).ToArray();
+            AppConfig.Domains3 = string.IsNullOrWhiteSpace(config.Domains3) ? null : config.Domains3.Split(',').Select(d => d.Trim()).Where(d => !string.IsNullOrEmpty(d)).ToArray();
             AppConfig.PingThreads = ParseWithDefault(config.PingThreads, 8);
             AppConfig.MaxIps = ParseWithDefault(config.MaxIps, 400);
             AppConfig.PingIntervalMs = ParseWithDefault(config.PingIntervalMs, 150);
@@ -63,13 +65,15 @@ namespace CloudflareFastCDN
             }
         }
 
-        static (string CloudflareKey, string Domains, string PingThreads, string MaxIps, string PingIntervalMs, string HttpProbeUrl, string RunMinutes, string BandwidthPriority, string UpdateIPList) LoadConfiguration(string[] args, bool isDocker)
+        static (string CloudflareKey, string Domains, string Domains2, string Domains3, string PingThreads, string MaxIps, string PingIntervalMs, string HttpProbeUrl, string RunMinutes, string BandwidthPriority, string UpdateIPList) LoadConfiguration(string[] args, bool isDocker)
         {
-            string cfKey, domains, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, runMinutes, bandwidthPriority, updateIPList;
+            string cfKey, domains, domains2, domains3, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, runMinutes, bandwidthPriority, updateIPList;
 
 #if DEBUG
             cfKey = File.ReadAllText("CLOUDFLARE_KEY.txt");
             domains = File.ReadAllText("DOMAINS.txt");
+            domains2 = null;
+            domains3 = null;
             pingThreads = "8";
             maxIps = "400";
             pingIntervalMs = "150";
@@ -80,6 +84,8 @@ namespace CloudflareFastCDN
 #else
     cfKey = Environment.GetEnvironmentVariable("CLOUDFLARE_KEY");
     domains = Environment.GetEnvironmentVariable("DOMAINS");
+    domains2 = Environment.GetEnvironmentVariable("DOMAINS2");
+    domains3 = Environment.GetEnvironmentVariable("DOMAINS3");
     pingThreads = Environment.GetEnvironmentVariable("PING_THREADS");
     maxIps = Environment.GetEnvironmentVariable("MAX_IPS");
     pingIntervalMs = Environment.GetEnvironmentVariable("PING_INTERVAL_MS");
@@ -94,6 +100,8 @@ namespace CloudflareFastCDN
                 var parameters = ParseCommandLineArgs(args);
                 cfKey = parameters.GetValueOrDefault("CLOUDFLARE_KEY", cfKey);
                 domains = parameters.GetValueOrDefault("DOMAINS", domains);
+                domains2 = parameters.GetValueOrDefault("DOMAINS2", domains2);
+                domains3 = parameters.GetValueOrDefault("DOMAINS3", domains3);
                 pingThreads = parameters.GetValueOrDefault("PING_THREADS", pingThreads);
                 maxIps = parameters.GetValueOrDefault("MAX_IPS", maxIps);
                 pingIntervalMs = parameters.GetValueOrDefault("PING_INTERVAL_MS", pingIntervalMs);
@@ -103,7 +111,7 @@ namespace CloudflareFastCDN
                 updateIPList = parameters.GetValueOrDefault("UPDATE_IP_LIST", updateIPList);
             }
 
-            return (cfKey, domains, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, runMinutes, bandwidthPriority, updateIPList);
+            return (cfKey, domains, domains2, domains3, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, runMinutes, bandwidthPriority, updateIPList);
         }
 
 
@@ -156,6 +164,10 @@ namespace CloudflareFastCDN
             Console.WriteLine($"  运行环境: {(isDocker ? "Docker" : "Local")}");
             Console.WriteLine($"  CLOUDFLARE_KEY: {maskedKey}");
             Console.WriteLine($"  DOMAINS: {string.Join(",", AppConfig.Domains)}");
+            if (AppConfig.Domains2 != null)
+                Console.WriteLine($"  DOMAINS2: {string.Join(",", AppConfig.Domains2)}");
+            if (AppConfig.Domains3 != null)
+                Console.WriteLine($"  DOMAINS3: {string.Join(",", AppConfig.Domains3)}");
             Console.WriteLine($"  PING_THREADS: {AppConfig.PingThreads}");
             Console.WriteLine($"  MAX_IPS: {AppConfig.MaxIps}");
             Console.WriteLine($"  PING_INTERVAL_MS: {AppConfig.PingIntervalMs}");
@@ -274,17 +286,17 @@ namespace CloudflareFastCDN
                 }
             }
 
-            PingData? top1Data;
+            List<PingData> topNData;
             if (topHttpList.Any())
             {
                 if (!AppConfig.BandwidthPriority)
                 {
                     topHttpList.Sort((a, b) => a.Delay.TotalMicroseconds.CompareTo(b.Delay.TotalMicroseconds));
-                    top1Data = topHttpList.FirstOrDefault();
+                    topNData = topHttpList.Take(3).ToList();
 
-                    if (top1Data != null)
+                    if (topNData.Count > 0)
                     {
-                        Console.WriteLine($"当前为连接速度优先，按HTTP延迟选择IP {top1Data.IP} {top1Data.Delay.TotalMilliseconds:0.00}ms");
+                        Console.WriteLine($"当前为连接速度优先，按HTTP延迟选择IP {topNData[0].IP} {topNData[0].Delay.TotalMilliseconds:0.00}ms");
                     }
                 }
                 else
@@ -319,29 +331,32 @@ namespace CloudflareFastCDN
                             return speedCompare != 0 ? speedCompare : a.data.Delay.CompareTo(b.data.Delay);
                         });
 
-                        top1Data = speedRankedList[0].data;
-                        Console.WriteLine($"最终按下载带宽选择IP {top1Data.IP} {speedRankedList[0].mbps:0.00} Mbps");
+                        topNData = speedRankedList.Take(3).Select(r => r.data).ToList();
+                        Console.WriteLine($"最终按下载带宽选择IP {topNData[0].IP} {speedRankedList[0].mbps:0.00} Mbps");
                     }
                     else
                     {
                         // /speedtest 不存在或下载测速全部失败时，回退到原有 HTTP 延迟逻辑
                         topHttpList.Sort((a, b) => a.Delay.TotalMicroseconds.CompareTo(b.Delay.TotalMicroseconds));
-                        top1Data = topHttpList.FirstOrDefault();
+                        topNData = topHttpList.Take(3).ToList();
 
-                        if (top1Data != null)
+                        if (topNData.Count > 0)
                         {
-                            Console.WriteLine($"下载测速不可用，回退到HTTP延迟选择IP {top1Data.IP} {top1Data.Delay.TotalMilliseconds:0.00}ms");
+                            Console.WriteLine($"下载测速不可用，回退到HTTP延迟选择IP {topNData[0].IP} {topNData[0].Delay.TotalMilliseconds:0.00}ms");
                         }
                     }
                 }
             }
             else
             {
-                top1Data = null;
+                topNData = new List<PingData>();
             }
 
-            if (top1Data != null)
+            var domainGroups = new[] { AppConfig.Domains, AppConfig.Domains2, AppConfig.Domains3 };
+
+            if (topNData.Count > 0)
             {
+                var top1Data = topNData[0];
                 // 缓存最优IP所在/24子网（按HTTP延迟排序存储，最多10条）
                 var subnet24 = subnetCache.GetSubnet24(top1Data.IP);
                 if (subnet24 != null)
@@ -351,27 +366,38 @@ namespace CloudflareFastCDN
                     Console.WriteLine($"已缓存子网 {subnet24} (HTTP延迟 {top1Data.Delay.TotalMilliseconds:0.00}ms，当前共{subnetCache.SubnetCount}个缓存子网)");
                 }
 
-                //执行更新DNS
-                foreach (var domain in AppConfig.Domains)
+                // 更新 DOMAINS / DOMAINS2 / DOMAINS3 对应排名 1 / 2 / 3 的 IP
+                for (int rank = 0; rank < domainGroups.Length; rank++)
                 {
-                    try
+                    var domains = domainGroups[rank];
+                    if (domains == null || domains.Length == 0) continue;
+                    if (rank >= topNData.Count)
                     {
-                        Console.WriteLine($"开始更新域名 {domain} {top1Data.IP}");
-                        var updated = await CloudflareAPIManager.Instance.AddOrUpdateARecord(domain, top1Data.IP.ToString());
-                        if (updated)
+                        Console.WriteLine($"可用IP不足，跳过 DOMAINS{(rank == 0 ? "" : rank.ToString())} 的DNS更新（需要第{rank + 1}名，实际只有{topNData.Count}个）");
+                        break;
+                    }
+
+                    var ip = topNData[rank];
+                    foreach (var domain in domains)
+                    {
+                        try
                         {
-                            Console.WriteLine($"已完成更新域名 {domain}");
+                            Console.WriteLine($"开始更新域名 {domain} {ip.IP}（第{rank + 1}名）");
+                            var updated = await CloudflareAPIManager.Instance.AddOrUpdateARecord(domain, ip.IP.ToString());
+                            if (updated)
+                            {
+                                Console.WriteLine($"已完成更新域名 {domain}");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"更新域名失败 {domain}");
+                            }
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            Console.WriteLine($"更新域名失败 {domain}");
+                            Console.WriteLine(ex.ToString());
                         }
                     }
-                    catch (Exception ex) 
-                    {
-                        Console.WriteLine(ex.ToString());
-                    }
-                    
                 }
             }
             else
