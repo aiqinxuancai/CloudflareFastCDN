@@ -113,7 +113,7 @@ docker compose down
 | `PING_THREADS` | 否 | `8` | Ping 并发线程数。数值越大检测越快，但过高可能导致丢包率上升。 |
 | `MAX_IPS` | 否 | `400` | 每轮最多抽样检测的 IP 数量。程序会先按网段抽取，再从其中随机采样。 |
 | `PING_INTERVAL_MS` | 否 | `150` | 单次 Ping 的间隔时间，单位毫秒。 |
-| `HTTP_PROBE_URL` | 否 | `https://www.visa.cn/` | HTTP 验证阶段访问的测试地址。建议使用你自己的站点作为验证地址。 |
+| `HTTP_PROBE_URL` | 否 | `https://www.visa.cn/` | HTTP 验证阶段访问的测试地址。建议使用你自己的站点作为验证地址，**记得要开黄云才行！**。 |
 | `RUN_MINUTES` | 否 | `30` | 每轮任务执行完成后的等待分钟数，随后进入下一轮检测。 |
 | `BANDWIDTH_PRIORITY` | 否 | `false` | 是否启用带宽优选。`false` 表示只按 HTTP 延迟最小选择；`true` 表示先做 HTTP 验证，再尝试下载同域 `/speedtest` 做测速，按带宽最高选择。 |
 | `UPDATE_IP_LIST` | 否 | `false` | 启动时是否先更新 Cloudflare 官方 IPv4 网段列表，可选值 `true` / `false`。 |
