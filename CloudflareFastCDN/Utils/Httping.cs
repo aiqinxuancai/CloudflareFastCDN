@@ -9,20 +9,19 @@ namespace CloudflareFastCDN.Utils
     {
         private const string DefaultProbeUrl = "https://www.visa.cn/";
         private const int DefaultSpeedTestBytes = 4 * 1024 * 1024;
-        private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(4);
-        private static readonly TimeSpan SpeedTestTimeout = TimeSpan.FromSeconds(10);
         private static readonly string UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
 
         public async Task<(int success, TimeSpan totalDelay)> Ping(IPAddress ip, int pingCount = 3)
         {
-            using var client = CreateClient(ip);
+            var probeTimeout = TimeSpan.FromMilliseconds(AppConfig.HttpProbeTimeoutMs);
+            using var client = CreateClient(ip, probeTimeout);
 
             int success = 0;
             TimeSpan totalDelay = TimeSpan.Zero;
 
             for (int i = 0; i < pingCount; i++)
             {
-                var pingResult = await SendProbeAsync(client);
+                var pingResult = await SendProbeAsync(client, probeTimeout);
                 if (!pingResult.success)
                 {
                     continue;
@@ -37,19 +36,17 @@ namespace CloudflareFastCDN.Utils
 
         public async Task<(bool success, TimeSpan delay)> SinglePing(IPAddress ip)
         {
-            using var client = CreateClient(ip);
-            return await SendProbeAsync(client);
+            var probeTimeout = TimeSpan.FromMilliseconds(AppConfig.HttpProbeTimeoutMs);
+            using var client = CreateClient(ip, probeTimeout);
+            return await SendProbeAsync(client, probeTimeout);
         }
 
         public async Task<(bool success, bool missing, double mbps, long bytesRead, TimeSpan duration)> SpeedTest(IPAddress ip, int maxBytes = DefaultSpeedTestBytes)
         {
-            using var client = CreateClient(ip, SpeedTestTimeout);
-            return await DownloadSpeedTestAsync(client, maxBytes);
-        }
-
-        private static HttpClient CreateClient(IPAddress ip)
-        {
-            return CreateClient(ip, ProbeTimeout);
+            var speedTestTimeout = TimeSpan.FromMilliseconds(AppConfig.HttpSpeedTestTimeoutMs);
+            var speedTestIdleTimeout = TimeSpan.FromMilliseconds(AppConfig.HttpSpeedTestIdleTimeoutMs);
+            using var client = CreateClient(ip, speedTestTimeout);
+            return await DownloadSpeedTestAsync(client, maxBytes, speedTestTimeout, speedTestIdleTimeout);
         }
 
         private static HttpClient CreateClient(IPAddress ip, TimeSpan timeout)
@@ -77,32 +74,33 @@ namespace CloudflareFastCDN.Utils
 
             var client = new HttpClient(handler)
             {
-                Timeout = timeout,
+                Timeout = Timeout.InfiniteTimeSpan,
             };
             client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
             return client;
         }
 
-        private static async Task<(bool success, TimeSpan delay)> SendProbeAsync(HttpClient client)
+        private static async Task<(bool success, TimeSpan delay)> SendProbeAsync(HttpClient client, TimeSpan timeout)
         {
-            var headResult = await SendAsync(client, HttpMethod.Head);
+            var headResult = await SendAsync(client, HttpMethod.Head, timeout);
             if (headResult.success || !ShouldFallbackToGet(headResult.statusCode))
             {
                 return (headResult.success, headResult.delay);
             }
 
-            var getResult = await SendAsync(client, HttpMethod.Get);
+            var getResult = await SendAsync(client, HttpMethod.Get, timeout);
             return (getResult.success, getResult.delay);
         }
 
-        private static async Task<(bool success, TimeSpan delay, HttpStatusCode statusCode)> SendAsync(HttpClient client, HttpMethod method)
+        private static async Task<(bool success, TimeSpan delay, HttpStatusCode statusCode)> SendAsync(HttpClient client, HttpMethod method, TimeSpan timeout)
         {
             using var request = new HttpRequestMessage(method, GetProbeUri());
             var stopwatch = Stopwatch.StartNew();
+            using var timeoutCts = new CancellationTokenSource(timeout);
 
             try
             {
-                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token);
                 stopwatch.Stop();
 
                 if (IsValidStatusCode(response.StatusCode))
@@ -113,6 +111,11 @@ namespace CloudflareFastCDN.Utils
                 Debug.WriteLine($"HTTP probe failed, status code: {(int)response.StatusCode}");
                 return (false, TimeSpan.Zero, response.StatusCode);
             }
+            catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested)
+            {
+                Debug.WriteLine($"HTTP probe timed out after {timeout.TotalMilliseconds:0}ms: {ex.Message}");
+                return (false, TimeSpan.Zero, 0);
+            }
             catch (Exception ex)
             {
                 Debug.WriteLine(ex);
@@ -120,13 +123,14 @@ namespace CloudflareFastCDN.Utils
             }
         }
 
-        private static async Task<(bool success, bool missing, double mbps, long bytesRead, TimeSpan duration)> DownloadSpeedTestAsync(HttpClient client, int maxBytes)
+        private static async Task<(bool success, bool missing, double mbps, long bytesRead, TimeSpan duration)> DownloadSpeedTestAsync(HttpClient client, int maxBytes, TimeSpan totalTimeout, TimeSpan idleTimeout)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, GetSpeedTestUri());
+            using var totalTimeoutCts = new CancellationTokenSource(totalTimeout);
 
             try
             {
-                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, totalTimeoutCts.Token);
                 if (response.StatusCode == HttpStatusCode.NotFound)
                 {
                     return (false, true, 0, 0, TimeSpan.Zero);
@@ -138,7 +142,7 @@ namespace CloudflareFastCDN.Utils
                     return (false, false, 0, 0, TimeSpan.Zero);
                 }
 
-                using var stream = await response.Content.ReadAsStreamAsync();
+                using var stream = await response.Content.ReadAsStreamAsync(totalTimeoutCts.Token);
                 byte[] buffer = new byte[64 * 1024];
                 long totalBytesRead = 0;
                 var stopwatch = Stopwatch.StartNew();
@@ -146,7 +150,11 @@ namespace CloudflareFastCDN.Utils
                 while (totalBytesRead < maxBytes)
                 {
                     var bytesToRead = (int)Math.Min(buffer.Length, maxBytes - totalBytesRead);
-                    var read = await stream.ReadAsync(buffer.AsMemory(0, bytesToRead));
+                    using var idleTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(totalTimeoutCts.Token);
+                    idleTimeoutCts.CancelAfter(idleTimeout);
+
+                    // ResponseHeadersRead only covers headers; this prevents the body read from hanging forever.
+                    var read = await stream.ReadAsync(buffer.AsMemory(0, bytesToRead), idleTimeoutCts.Token);
                     if (read == 0)
                     {
                         break;
@@ -164,6 +172,16 @@ namespace CloudflareFastCDN.Utils
 
                 var mbps = totalBytesRead * 8d / stopwatch.Elapsed.TotalSeconds / 1_000_000d;
                 return (true, false, mbps, totalBytesRead, stopwatch.Elapsed);
+            }
+            catch (OperationCanceledException ex) when (totalTimeoutCts.IsCancellationRequested)
+            {
+                Debug.WriteLine($"Speed test timed out after {totalTimeout.TotalMilliseconds:0}ms: {ex.Message}");
+                return (false, false, 0, 0, TimeSpan.Zero);
+            }
+            catch (OperationCanceledException ex)
+            {
+                Debug.WriteLine($"Speed test stalled for more than {idleTimeout.TotalMilliseconds:0}ms: {ex.Message}");
+                return (false, false, 0, 0, TimeSpan.Zero);
             }
             catch (Exception ex)
             {

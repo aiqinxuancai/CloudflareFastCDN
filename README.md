@@ -31,6 +31,9 @@ CloudflareFastCDN \
   --MAX_IPS=400 \
   --PING_INTERVAL_MS=150 \
   --HTTP_PROBE_URL=https://www.visa.cn/ \
+  --HTTP_PROBE_TIMEOUT_MS=4000 \
+  --HTTP_SPEEDTEST_TIMEOUT_MS=10000 \
+  --HTTP_SPEEDTEST_IDLE_TIMEOUT_MS=3000 \
   --RUN_MINUTES=30 \
   --BANDWIDTH_PRIORITY=false \
   --UPDATE_IP_LIST=false
@@ -48,6 +51,9 @@ docker run -d \
   -e MAX_IPS=400 \
   -e PING_INTERVAL_MS=150 \
   -e HTTP_PROBE_URL=https://www.visa.cn/ \
+  -e HTTP_PROBE_TIMEOUT_MS=4000 \
+  -e HTTP_SPEEDTEST_TIMEOUT_MS=10000 \
+  -e HTTP_SPEEDTEST_IDLE_TIMEOUT_MS=3000 \
   -e RUN_MINUTES=30 \
   -e BANDWIDTH_PRIORITY=false \
   -e UPDATE_IP_LIST=false \
@@ -74,6 +80,9 @@ services:
       MAX_IPS: "400"
       PING_INTERVAL_MS: "150"
       HTTP_PROBE_URL: "https://www.visa.cn/"
+      HTTP_PROBE_TIMEOUT_MS: "4000"
+      HTTP_SPEEDTEST_TIMEOUT_MS: "10000"
+      HTTP_SPEEDTEST_IDLE_TIMEOUT_MS: "3000"
       RUN_MINUTES: "30"
       BANDWIDTH_PRIORITY: "false"
       UPDATE_IP_LIST: "false"
@@ -114,6 +123,9 @@ docker compose down
 | `MAX_IPS` | 否 | `400` | 每轮最多抽样检测的 IP 数量。程序会先按网段抽取，再从其中随机采样。 |
 | `PING_INTERVAL_MS` | 否 | `150` | 单次 Ping 的间隔时间，单位毫秒。 |
 | `HTTP_PROBE_URL` | 否 | `https://www.visa.cn/` | HTTP 验证阶段访问的测试地址。建议使用你自己的站点作为验证地址。 |
+| `HTTP_PROBE_TIMEOUT_MS` | 否 | `4000` | 单次 HTTP 连通性验证超时时间，单位毫秒，覆盖连接/TLS/响应头阶段。 |
+| `HTTP_SPEEDTEST_TIMEOUT_MS` | 否 | `10000` | 单个 IP 的 `/speedtest` 下载测速总超时时间，单位毫秒。 |
+| `HTTP_SPEEDTEST_IDLE_TIMEOUT_MS` | 否 | `3000` | `/speedtest` 下载过程中单次读取的空闲超时，单位毫秒；用于避免服务端只返回响应头后长期不继续下发数据。 |
 | `RUN_MINUTES` | 否 | `30` | 每轮任务执行完成后的等待分钟数，随后进入下一轮检测。 |
 | `BANDWIDTH_PRIORITY` | 否 | `false` | 是否启用带宽优选。`false` 表示只按 HTTP 延迟最小选择；`true` 表示先做 HTTP 验证，再尝试下载同域 `/speedtest` 做测速，按带宽最高选择。 |
 | `UPDATE_IP_LIST` | 否 | `false` | 启动时是否先更新 Cloudflare 官方 IPv4 网段列表，可选值 `true` / `false`。 |
@@ -129,6 +141,7 @@ docker compose down
 - 仅当 `BANDWIDTH_PRIORITY=true` 时，程序才会尝试访问 `/speedtest`。
 - `/speedtest` 的实际地址是 `HTTP_PROBE_URL` 所在域名下的 `/speedtest`，例如 `https://www.visa.cn/speedtest`。
 - 如果 `/speedtest` 不存在或测速失败，程序会自动回退到按 HTTP 延迟优选。
+- 默认情况下，单次 HTTP 探测超时为 `4s`，单个 IP 的测速总超时为 `10s`，下载空闲超时为 `3s`；如网络较差可按需调大。
 - 建议准备一个静态测速文件，文件大小至少 `4 MB`，高速链路下结果会更稳定。
 
 ## 免责声明

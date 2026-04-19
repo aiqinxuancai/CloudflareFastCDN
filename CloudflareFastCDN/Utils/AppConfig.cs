@@ -27,6 +27,12 @@ namespace CloudflareFastCDN.Utils
 
         public static string HttpProbeUrl { get; set; } = "https://www.visa.cn/";
 
+        public static int HttpProbeTimeoutMs { get; set; } = 4000;
+
+        public static int HttpSpeedTestTimeoutMs { get; set; } = 10000;
+
+        public static int HttpSpeedTestIdleTimeoutMs { get; set; } = 3000;
+
         public static int RunMinutes { get; set; } = 30;
 
         public static bool BandwidthPriority { get; set; } = false;

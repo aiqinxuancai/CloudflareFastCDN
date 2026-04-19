@@ -38,14 +38,17 @@ namespace CloudflareFastCDN
                 return;
             }
 
-            AppConfig.CloudflareKey = config.CloudflareKey;
-            AppConfig.Domains = config.Domains.Split(',').Select(d => d.Trim()).Where(d => !string.IsNullOrEmpty(d)).ToArray();
+            AppConfig.CloudflareKey = config.CloudflareKey!;
+            AppConfig.Domains = config.Domains!.Split(',').Select(d => d.Trim()).Where(d => !string.IsNullOrEmpty(d)).ToArray();
             AppConfig.Domains2 = string.IsNullOrWhiteSpace(config.Domains2) ? null : config.Domains2.Split(',').Select(d => d.Trim()).Where(d => !string.IsNullOrEmpty(d)).ToArray();
             AppConfig.Domains3 = string.IsNullOrWhiteSpace(config.Domains3) ? null : config.Domains3.Split(',').Select(d => d.Trim()).Where(d => !string.IsNullOrEmpty(d)).ToArray();
             AppConfig.PingThreads = ParseWithDefault(config.PingThreads, 8);
             AppConfig.MaxIps = ParseWithDefault(config.MaxIps, 400);
             AppConfig.PingIntervalMs = ParseWithDefault(config.PingIntervalMs, 150);
             AppConfig.HttpProbeUrl = string.IsNullOrWhiteSpace(config.HttpProbeUrl) ? "https://www.visa.cn/" : config.HttpProbeUrl.Trim();
+            AppConfig.HttpProbeTimeoutMs = ParsePositiveIntWithDefault(config.HttpProbeTimeoutMs, 4000);
+            AppConfig.HttpSpeedTestTimeoutMs = ParsePositiveIntWithDefault(config.HttpSpeedTestTimeoutMs, 10000);
+            AppConfig.HttpSpeedTestIdleTimeoutMs = ParsePositiveIntWithDefault(config.HttpSpeedTestIdleTimeoutMs, 3000);
             AppConfig.RunMinutes = ParseWithDefault(config.RunMinutes, 30);
             AppConfig.BandwidthPriority = ParseWithDefault(config.BandwidthPriority, false);
             AppConfig.UpdateIPList = ParseWithDefault(config.UpdateIPList, false);
@@ -65,9 +68,9 @@ namespace CloudflareFastCDN
             }
         }
 
-        static (string CloudflareKey, string Domains, string Domains2, string Domains3, string PingThreads, string MaxIps, string PingIntervalMs, string HttpProbeUrl, string RunMinutes, string BandwidthPriority, string UpdateIPList) LoadConfiguration(string[] args, bool isDocker)
+        static (string? CloudflareKey, string? Domains, string? Domains2, string? Domains3, string? PingThreads, string? MaxIps, string? PingIntervalMs, string? HttpProbeUrl, string? HttpProbeTimeoutMs, string? HttpSpeedTestTimeoutMs, string? HttpSpeedTestIdleTimeoutMs, string? RunMinutes, string? BandwidthPriority, string? UpdateIPList) LoadConfiguration(string[] args, bool isDocker)
         {
-            string cfKey, domains, domains2, domains3, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, runMinutes, bandwidthPriority, updateIPList;
+            string? cfKey, domains, domains2, domains3, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, httpProbeTimeoutMs, httpSpeedTestTimeoutMs, httpSpeedTestIdleTimeoutMs, runMinutes, bandwidthPriority, updateIPList;
 
 #if DEBUG
             cfKey = File.ReadAllText("CLOUDFLARE_KEY.txt");
@@ -78,6 +81,9 @@ namespace CloudflareFastCDN
             maxIps = "400";
             pingIntervalMs = "150";
             httpProbeUrl = "https://www.visa.cn/";
+            httpProbeTimeoutMs = "4000";
+            httpSpeedTestTimeoutMs = "10000";
+            httpSpeedTestIdleTimeoutMs = "3000";
             runMinutes = "30";
             bandwidthPriority = "false";
             updateIPList = "false";
@@ -90,6 +96,9 @@ namespace CloudflareFastCDN
     maxIps = Environment.GetEnvironmentVariable("MAX_IPS");
     pingIntervalMs = Environment.GetEnvironmentVariable("PING_INTERVAL_MS");
     httpProbeUrl = Environment.GetEnvironmentVariable("HTTP_PROBE_URL");
+    httpProbeTimeoutMs = Environment.GetEnvironmentVariable("HTTP_PROBE_TIMEOUT_MS");
+    httpSpeedTestTimeoutMs = Environment.GetEnvironmentVariable("HTTP_SPEEDTEST_TIMEOUT_MS");
+    httpSpeedTestIdleTimeoutMs = Environment.GetEnvironmentVariable("HTTP_SPEEDTEST_IDLE_TIMEOUT_MS");
     runMinutes = Environment.GetEnvironmentVariable("RUN_MINUTES");
     bandwidthPriority = Environment.GetEnvironmentVariable("BANDWIDTH_PRIORITY");
     updateIPList = Environment.GetEnvironmentVariable("UPDATE_IP_LIST");
@@ -106,17 +115,20 @@ namespace CloudflareFastCDN
                 maxIps = parameters.GetValueOrDefault("MAX_IPS", maxIps);
                 pingIntervalMs = parameters.GetValueOrDefault("PING_INTERVAL_MS", pingIntervalMs);
                 httpProbeUrl = parameters.GetValueOrDefault("HTTP_PROBE_URL", httpProbeUrl);
+                httpProbeTimeoutMs = parameters.GetValueOrDefault("HTTP_PROBE_TIMEOUT_MS", httpProbeTimeoutMs);
+                httpSpeedTestTimeoutMs = parameters.GetValueOrDefault("HTTP_SPEEDTEST_TIMEOUT_MS", httpSpeedTestTimeoutMs);
+                httpSpeedTestIdleTimeoutMs = parameters.GetValueOrDefault("HTTP_SPEEDTEST_IDLE_TIMEOUT_MS", httpSpeedTestIdleTimeoutMs);
                 runMinutes = parameters.GetValueOrDefault("RUN_MINUTES", runMinutes);
                 bandwidthPriority = parameters.GetValueOrDefault("BANDWIDTH_PRIORITY", bandwidthPriority);
                 updateIPList = parameters.GetValueOrDefault("UPDATE_IP_LIST", updateIPList);
             }
 
-            return (cfKey, domains, domains2, domains3, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, runMinutes, bandwidthPriority, updateIPList);
+            return (cfKey, domains, domains2, domains3, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, httpProbeTimeoutMs, httpSpeedTestTimeoutMs, httpSpeedTestIdleTimeoutMs, runMinutes, bandwidthPriority, updateIPList);
         }
 
 
 
-        static T ParseWithDefault<T>(string value, T defaultValue)
+        static T ParseWithDefault<T>(string? value, T defaultValue)
         {
             if (typeof(T) == typeof(int))
             {
@@ -135,9 +147,16 @@ namespace CloudflareFastCDN
             return defaultValue;
         }
 
-        private static Dictionary<string, string> ParseCommandLineArgs(string[] args)
+        static int ParsePositiveIntWithDefault(string? value, int defaultValue)
         {
-            Dictionary<string, string> parameters = new Dictionary<string, string>();
+            return int.TryParse(value, out int result) && result > 0
+                ? result
+                : defaultValue;
+        }
+
+        private static Dictionary<string, string?> ParseCommandLineArgs(string[] args)
+        {
+            Dictionary<string, string?> parameters = new Dictionary<string, string?>();
 
             foreach (string arg in args)
             {
@@ -172,6 +191,9 @@ namespace CloudflareFastCDN
             Console.WriteLine($"  MAX_IPS: {AppConfig.MaxIps}");
             Console.WriteLine($"  PING_INTERVAL_MS: {AppConfig.PingIntervalMs}");
             Console.WriteLine($"  HTTP_PROBE_URL: {AppConfig.HttpProbeUrl}");
+            Console.WriteLine($"  HTTP_PROBE_TIMEOUT_MS: {AppConfig.HttpProbeTimeoutMs}");
+            Console.WriteLine($"  HTTP_SPEEDTEST_TIMEOUT_MS: {AppConfig.HttpSpeedTestTimeoutMs}");
+            Console.WriteLine($"  HTTP_SPEEDTEST_IDLE_TIMEOUT_MS: {AppConfig.HttpSpeedTestIdleTimeoutMs}");
             Console.WriteLine($"  RUN_MINUTES: {AppConfig.RunMinutes}");
             Console.WriteLine($"  BANDWIDTH_PRIORITY: {AppConfig.BandwidthPriority}");
             Console.WriteLine($"  UPDATE_IP_LIST: {AppConfig.UpdateIPList}");
