@@ -25,7 +25,7 @@ namespace CloudflareFastCDN.Utils
         public static int HttpProbeTimeoutMs { get; set; } = 4000;
         public static int HttpSpeedTestTimeoutMs { get; set; } = 10000;
         public static int HttpSpeedTestIdleTimeoutMs { get; set; } = 3000;
-        public static int RunMinutes { get; set; } = 30;
+        public static int RunMinutes { get; set; } = 60;
         public static bool BandwidthPriority { get; set; } = false;
         public static bool UpdateIPList { get; set; } = false;
         public static bool EnableSupplementalHttpCheck { get; set; } = false;

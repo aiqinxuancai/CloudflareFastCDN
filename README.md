@@ -9,11 +9,11 @@
 1. 从 Cloudflare IPv4 网段中抽样出待测 IP。
 2. 第 1 轮对全部候选做 4 次 ICMP Ping。
 3. 第 2 轮对前 100 个结果做 10 次 ICMP Ping，进一步筛掉丢包较高的 IP。
-4. **子网缓存阶段**：从历史优选中积累的最多 10 个 `/24` 子网里各随机抽取 1 个 IP（共最多 10 个），进行 TCP Ping 连通性验证，通过的直接加入最终候选列表。子网缓存按 HTTP 延迟升序排序，持久化在 `subnet_cache.json`（Docker 下为 `/data/subnet_cache.json`）。
-5. 对候选 IP 做 HTTP 验证。
+4. **子网缓存阶段**：从历史优选中积累的最多 10 个 `/24` 子网里随机抽取最多 3 个 IP，进行 TCP Ping 连通性验证，通过的直接加入最终候选列表。子网缓存按 HTTP 延迟升序排序，持久化在 `subnet_cache.json`（Docker 下为 `/data/subnet_cache.json`）。
+5. 对最终候选 IP 做 HTTP 验证：当前轮 Ping 结果保留 7 个，子网缓存最多补充 3 个，总量最多 10 个；每个候选节点之间间隔 5 秒再继续。
 6. 根据 `BANDWIDTH_PRIORITY` 决定最终挑选方式：
    - `false`：只按 HTTP 延迟最小选择，保持旧逻辑。
-   - `true`：在 HTTP 验证通过后，尝试访问 `HTTP_PROBE_URL` 同域名下的 `/speedtest` 文件并做下载测速，优先选择带宽最高的 IP。
+   - `true`：在 HTTP 验证通过后，尝试访问 `HTTP_PROBE_URL` 同域名下的 `/speedtest` 文件并做下载测速，优先选择带宽最高的 IP；测速节点之间同样间隔 5 秒。
 7. 如果 `BANDWIDTH_PRIORITY=true` 时 `/speedtest` 不存在或全部测速失败，则自动回退到旧的 HTTP 延迟逻辑。
 8. 选出最优 IP 后，将其所在 `/24` 子网存入子网缓存（若 CF 对应 CIDR 覆盖完整 `/24`），供下次运行时优先验证。
 9. 按服务商分组更新 DNS A 记录：`*_DOMAINS` 使用第 1 名 IP，`*_DOMAINS2` 使用第 2 名 IP，`*_DOMAINS3` 使用第 3 名 IP。
@@ -42,7 +42,7 @@ CloudflareFastCDN \
   --HTTP_PROBE_TIMEOUT_MS=4000 \
   --HTTP_SPEEDTEST_TIMEOUT_MS=10000 \
   --HTTP_SPEEDTEST_IDLE_TIMEOUT_MS=3000 \
-  --RUN_MINUTES=30 \
+  --RUN_MINUTES=60 \
   --BANDWIDTH_PRIORITY=false \
   --UPDATE_IP_LIST=false \
   --ENABLE_SUPPLEMENTAL_HTTP_CHECK=false
@@ -69,7 +69,7 @@ docker run -d \
   -e HTTP_PROBE_TIMEOUT_MS=4000 \
   -e HTTP_SPEEDTEST_TIMEOUT_MS=10000 \
   -e HTTP_SPEEDTEST_IDLE_TIMEOUT_MS=3000 \
-  -e RUN_MINUTES=30 \
+  -e RUN_MINUTES=60 \
   -e BANDWIDTH_PRIORITY=false \
   -e UPDATE_IP_LIST=false \
   -e ENABLE_SUPPLEMENTAL_HTTP_CHECK=false \
@@ -105,7 +105,7 @@ services:
       HTTP_PROBE_TIMEOUT_MS: "4000"
       HTTP_SPEEDTEST_TIMEOUT_MS: "10000"
       HTTP_SPEEDTEST_IDLE_TIMEOUT_MS: "3000"
-      RUN_MINUTES: "30"
+      RUN_MINUTES: "60"
       BANDWIDTH_PRIORITY: "false"
       UPDATE_IP_LIST: "false"
       ENABLE_SUPPLEMENTAL_HTTP_CHECK: "false"
@@ -167,7 +167,7 @@ docker compose down
 | `HTTP_PROBE_TIMEOUT_MS` | 否 | `4000` | 单次 HTTP 连通性验证超时时间，单位毫秒，覆盖连接/TLS/响应头阶段。 |
 | `HTTP_SPEEDTEST_TIMEOUT_MS` | 否 | `10000` | 单个 IP 的 `/speedtest` 下载测速总超时时间，单位毫秒。 |
 | `HTTP_SPEEDTEST_IDLE_TIMEOUT_MS` | 否 | `3000` | `/speedtest` 下载过程中单次读取的空闲超时，单位毫秒；用于避免服务端只返回响应头后长期不继续下发数据。 |
-| `RUN_MINUTES` | 否 | `30` | 每轮任务执行完成后的等待分钟数，随后进入下一轮检测。 |
+| `RUN_MINUTES` | 否 | `60` | 每轮任务执行完成后的等待分钟数，随后进入下一轮检测。 |
 | `BANDWIDTH_PRIORITY` | 否 | `false` | 是否启用带宽优选。`false` 表示只按 HTTP 延迟最小选择；`true` 表示先做 HTTP 验证，再尝试下载同域 `/speedtest` 做测速，按带宽最高选择。 |
 | `UPDATE_IP_LIST` | 否 | `false` | 启动时是否先更新 Cloudflare 官方 IPv4 网段列表，可选值 `true` / `false`。 |
 | `ENABLE_SUPPLEMENTAL_HTTP_CHECK` | 否 | `false` | 是否启用优选后的补充 HTTP 检查。启用后等待期间每 5 分钟检查本轮最优 IP，最多 3 次，全部失败则提前重新优选并重新计时。 |

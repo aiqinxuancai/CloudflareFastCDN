@@ -9,11 +9,12 @@ namespace CloudflareFastCDN
         private const int FirstRoundPingCount = 4;
         private const int SecondRoundPingCount = 10;
         private const int SecondRoundMaxPacketLoss = 1;
-        private const int HttpCandidateCount = 10;
+        private const int HttpCandidateCount = 7;
         private const int HttpProbeCount = 3;
         private const int HttpMinSuccessCount = 2;
+        private static readonly TimeSpan FinalCandidateInterval = TimeSpan.FromSeconds(5);
         private const int SubnetProbePingCount = 2;
-        private const int SubnetSampleCount = 10;
+        private const int SubnetSampleCount = 3;
         private static readonly TimeSpan SupplementalHttpCheckInterval = TimeSpan.FromMinutes(5);
         private const int SupplementalHttpCheckCount = 3;
 
@@ -105,7 +106,7 @@ namespace CloudflareFastCDN
                 HttpProbeTimeoutMs = ResolveSetting("HTTP_PROBE_TIMEOUT_MS", "4000"),
                 HttpSpeedTestTimeoutMs = ResolveSetting("HTTP_SPEEDTEST_TIMEOUT_MS", "10000"),
                 HttpSpeedTestIdleTimeoutMs = ResolveSetting("HTTP_SPEEDTEST_IDLE_TIMEOUT_MS", "3000"),
-                RunMinutes = ResolveSetting("RUN_MINUTES", "30"),
+                RunMinutes = ResolveSetting("RUN_MINUTES", "60"),
                 BandwidthPriority = ResolveSetting("BANDWIDTH_PRIORITY", "false"),
                 UpdateIPList = ResolveSetting("UPDATE_IP_LIST", "false"),
                 EnableSupplementalHttpCheck = ResolveSetting("ENABLE_SUPPLEMENTAL_HTTP_CHECK", "false")
@@ -137,7 +138,7 @@ namespace CloudflareFastCDN
             AppConfig.HttpProbeTimeoutMs = ParsePositiveIntWithDefault(config.HttpProbeTimeoutMs, 4000);
             AppConfig.HttpSpeedTestTimeoutMs = ParsePositiveIntWithDefault(config.HttpSpeedTestTimeoutMs, 10000);
             AppConfig.HttpSpeedTestIdleTimeoutMs = ParsePositiveIntWithDefault(config.HttpSpeedTestIdleTimeoutMs, 3000);
-            AppConfig.RunMinutes = ParseNonZeroIntWithDefault(config.RunMinutes, 30);
+            AppConfig.RunMinutes = ParseNonZeroIntWithDefault(config.RunMinutes, 60);
             AppConfig.BandwidthPriority = ParseBoolWithDefault(config.BandwidthPriority, false);
             AppConfig.UpdateIPList = ParseBoolWithDefault(config.UpdateIPList, false);
             AppConfig.EnableSupplementalHttpCheck = ParseBoolWithDefault(config.EnableSupplementalHttpCheck, false);
@@ -493,6 +494,12 @@ namespace CloudflareFastCDN
                     ip.Delay = averageDelay;
                     topHttpList.Add(ip);
                 }
+
+                if (count < httpCandidates.Count)
+                {
+                    Console.WriteLine($"等待{FinalCandidateInterval.TotalSeconds:0}秒后测试下一个HTTP候选节点");
+                    await Task.Delay(FinalCandidateInterval);
+                }
             }
 
             List<PingData> topNData;
@@ -511,8 +518,9 @@ namespace CloudflareFastCDN
                 else
                 {
                     var speedRankedList = new List<(PingData Data, double Mbps, long BytesRead, TimeSpan Duration)>();
-                    foreach (var ip in topHttpList)
+                    for (int speedIndex = 0; speedIndex < topHttpList.Count; speedIndex++)
                     {
+                        var ip = topHttpList[speedIndex];
                         var speedResult = await httpPing.SpeedTest(ip.IP);
                         if (!speedResult.success)
                         {
@@ -525,11 +533,18 @@ namespace CloudflareFastCDN
                                 Console.WriteLine($"下载测速失败 {ip.IP}");
                             }
 
-                            continue;
+                        }
+                        else
+                        {
+                            speedRankedList.Add((ip, speedResult.mbps, speedResult.bytesRead, speedResult.duration));
+                            Console.WriteLine($"下载测速 [{speedRankedList.Count}] {ip.IP} 速度：{speedResult.mbps:0.00} Mbps 已下载：{speedResult.bytesRead / 1024d / 1024d:0.00} MB 用时：{speedResult.duration.TotalMilliseconds:0}ms");
                         }
 
-                        speedRankedList.Add((ip, speedResult.mbps, speedResult.bytesRead, speedResult.duration));
-                        Console.WriteLine($"下载测速 [{speedRankedList.Count}] {ip.IP} 速度：{speedResult.mbps:0.00} Mbps 已下载：{speedResult.bytesRead / 1024d / 1024d:0.00} MB 用时：{speedResult.duration.TotalMilliseconds:0}ms");
+                        if (speedIndex < topHttpList.Count - 1)
+                        {
+                            Console.WriteLine($"等待{FinalCandidateInterval.TotalSeconds:0}秒后测速下一个候选节点");
+                            await Task.Delay(FinalCandidateInterval);
+                        }
                     }
 
                     if (speedRankedList.Any())
