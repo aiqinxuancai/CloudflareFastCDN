@@ -16,6 +16,7 @@
    - `true`：在 HTTP 验证通过后，尝试访问 `HTTP_PROBE_URL` 同域名下的 `/speedtest` 文件并做下载测速，优先选择带宽最高的 IP。
 7. 如果 `BANDWIDTH_PRIORITY=true` 时 `/speedtest` 不存在或全部测速失败，则自动回退到旧的 HTTP 延迟逻辑。
 8. 选出最优 IP 后，将其所在 `/24` 子网存入子网缓存（若 CF 对应 CIDR 覆盖完整 `/24`），供下次运行时优先验证。
+9. 单轮优选完成后，等待 `RUN_MINUTES` 进入下一轮；当 `ENABLE_SUPPLEMENTAL_HTTP_CHECK=true` 时，等待期间每 5 分钟对本轮最优 IP 做最多 3 次 HTTP 补充检查，任意一次成功即继续等待，连续 3 次失败则立即重新优选并从完成时间重新计时。
 
 ## 使用方式
 
@@ -36,7 +37,8 @@ CloudflareFastCDN \
   --HTTP_SPEEDTEST_IDLE_TIMEOUT_MS=3000 \
   --RUN_MINUTES=30 \
   --BANDWIDTH_PRIORITY=false \
-  --UPDATE_IP_LIST=false
+  --UPDATE_IP_LIST=false \
+  --ENABLE_SUPPLEMENTAL_HTTP_CHECK=false
 ```
 
 ### Docker 运行
@@ -57,6 +59,7 @@ docker run -d \
   -e RUN_MINUTES=30 \
   -e BANDWIDTH_PRIORITY=false \
   -e UPDATE_IP_LIST=false \
+  -e ENABLE_SUPPLEMENTAL_HTTP_CHECK=false \
   -v cloudflare-fast-cdn-data:/data \
   aiqinxuancai/cloudfarefastcdn:latest
 ```
@@ -86,6 +89,7 @@ services:
       RUN_MINUTES: "30"
       BANDWIDTH_PRIORITY: "false"
       UPDATE_IP_LIST: "false"
+      ENABLE_SUPPLEMENTAL_HTTP_CHECK: "false"
     volumes:
       - cloudflare-fast-cdn-data:/data
 
@@ -129,6 +133,7 @@ docker compose down
 | `RUN_MINUTES` | 否 | `30` | 每轮任务执行完成后的等待分钟数，随后进入下一轮检测。 |
 | `BANDWIDTH_PRIORITY` | 否 | `false` | 是否启用带宽优选。`false` 表示只按 HTTP 延迟最小选择；`true` 表示先做 HTTP 验证，再尝试下载同域 `/speedtest` 做测速，按带宽最高选择。 |
 | `UPDATE_IP_LIST` | 否 | `false` | 启动时是否先更新 Cloudflare 官方 IPv4 网段列表，可选值 `true` / `false`。 |
+| `ENABLE_SUPPLEMENTAL_HTTP_CHECK` | 否 | `false` | 是否启用优选后的补充 HTTP 检查。启用后等待期间每 5 分钟检查本轮最优 IP，最多 3 次，全部失败则提前重新优选并重新计时。 |
 
 ## 参数来源说明
 

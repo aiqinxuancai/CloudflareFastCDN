@@ -39,6 +39,8 @@ namespace CloudflareFastCDN.Utils
 
         public static bool UpdateIPList { get; set; } = false;
 
+        public static bool EnableSupplementalHttpCheck { get; set; } = false;
+
 
 
     }

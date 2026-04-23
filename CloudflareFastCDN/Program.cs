@@ -15,6 +15,8 @@ namespace CloudflareFastCDN
         private const int HttpMinSuccessCount = 2;
         private const int SubnetProbePingCount = 2;
         private const int SubnetSampleCount = 10;
+        private static readonly TimeSpan SupplementalHttpCheckInterval = TimeSpan.FromMinutes(5);
+        private const int SupplementalHttpCheckCount = 3;
 
         static void Main(string[] args)
         {
@@ -52,6 +54,7 @@ namespace CloudflareFastCDN
             AppConfig.RunMinutes = ParseWithDefault(config.RunMinutes, 30);
             AppConfig.BandwidthPriority = ParseWithDefault(config.BandwidthPriority, false);
             AppConfig.UpdateIPList = ParseWithDefault(config.UpdateIPList, false);
+            AppConfig.EnableSupplementalHttpCheck = ParseWithDefault(config.EnableSupplementalHttpCheck, false);
 
             PrintStartupConfiguration(isDocker);
 
@@ -62,15 +65,14 @@ namespace CloudflareFastCDN
 
             while (true)
             {
-                await SingleSelect();
-                Console.WriteLine($"等待{AppConfig.RunMinutes}分钟");
-                await Task.Delay(TimeSpan.FromMinutes(AppConfig.RunMinutes));
+                var selectedIp = await SingleSelect();
+                await WaitForNextSelection(selectedIp);
             }
         }
 
-        static (string? CloudflareKey, string? Domains, string? Domains2, string? Domains3, string? PingThreads, string? MaxIps, string? PingIntervalMs, string? HttpProbeUrl, string? HttpProbeTimeoutMs, string? HttpSpeedTestTimeoutMs, string? HttpSpeedTestIdleTimeoutMs, string? RunMinutes, string? BandwidthPriority, string? UpdateIPList) LoadConfiguration(string[] args, bool isDocker)
+        static (string? CloudflareKey, string? Domains, string? Domains2, string? Domains3, string? PingThreads, string? MaxIps, string? PingIntervalMs, string? HttpProbeUrl, string? HttpProbeTimeoutMs, string? HttpSpeedTestTimeoutMs, string? HttpSpeedTestIdleTimeoutMs, string? RunMinutes, string? BandwidthPriority, string? UpdateIPList, string? EnableSupplementalHttpCheck) LoadConfiguration(string[] args, bool isDocker)
         {
-            string? cfKey, domains, domains2, domains3, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, httpProbeTimeoutMs, httpSpeedTestTimeoutMs, httpSpeedTestIdleTimeoutMs, runMinutes, bandwidthPriority, updateIPList;
+            string? cfKey, domains, domains2, domains3, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, httpProbeTimeoutMs, httpSpeedTestTimeoutMs, httpSpeedTestIdleTimeoutMs, runMinutes, bandwidthPriority, updateIPList, enableSupplementalHttpCheck;
 
 #if DEBUG
             cfKey = File.ReadAllText("CLOUDFLARE_KEY.txt");
@@ -87,6 +89,7 @@ namespace CloudflareFastCDN
             runMinutes = "30";
             bandwidthPriority = "false";
             updateIPList = "false";
+            enableSupplementalHttpCheck = "false";
 #else
     cfKey = Environment.GetEnvironmentVariable("CLOUDFLARE_KEY");
     domains = Environment.GetEnvironmentVariable("DOMAINS");
@@ -102,6 +105,7 @@ namespace CloudflareFastCDN
     runMinutes = Environment.GetEnvironmentVariable("RUN_MINUTES");
     bandwidthPriority = Environment.GetEnvironmentVariable("BANDWIDTH_PRIORITY");
     updateIPList = Environment.GetEnvironmentVariable("UPDATE_IP_LIST");
+    enableSupplementalHttpCheck = Environment.GetEnvironmentVariable("ENABLE_SUPPLEMENTAL_HTTP_CHECK");
 #endif
 
             if (!isDocker && string.IsNullOrWhiteSpace(cfKey))
@@ -121,9 +125,10 @@ namespace CloudflareFastCDN
                 runMinutes = parameters.GetValueOrDefault("RUN_MINUTES", runMinutes);
                 bandwidthPriority = parameters.GetValueOrDefault("BANDWIDTH_PRIORITY", bandwidthPriority);
                 updateIPList = parameters.GetValueOrDefault("UPDATE_IP_LIST", updateIPList);
+                enableSupplementalHttpCheck = parameters.GetValueOrDefault("ENABLE_SUPPLEMENTAL_HTTP_CHECK", enableSupplementalHttpCheck);
             }
 
-            return (cfKey, domains, domains2, domains3, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, httpProbeTimeoutMs, httpSpeedTestTimeoutMs, httpSpeedTestIdleTimeoutMs, runMinutes, bandwidthPriority, updateIPList);
+            return (cfKey, domains, domains2, domains3, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, httpProbeTimeoutMs, httpSpeedTestTimeoutMs, httpSpeedTestIdleTimeoutMs, runMinutes, bandwidthPriority, updateIPList, enableSupplementalHttpCheck);
         }
 
 
@@ -197,6 +202,88 @@ namespace CloudflareFastCDN
             Console.WriteLine($"  RUN_MINUTES: {AppConfig.RunMinutes}");
             Console.WriteLine($"  BANDWIDTH_PRIORITY: {AppConfig.BandwidthPriority}");
             Console.WriteLine($"  UPDATE_IP_LIST: {AppConfig.UpdateIPList}");
+            Console.WriteLine($"  ENABLE_SUPPLEMENTAL_HTTP_CHECK: {AppConfig.EnableSupplementalHttpCheck}");
+        }
+
+        private static async Task WaitForNextSelection(IPAddress? selectedIp)
+        {
+            var regularInterval = TimeSpan.FromMinutes(AppConfig.RunMinutes);
+            if (regularInterval <= TimeSpan.Zero)
+            {
+                Console.WriteLine("RUN_MINUTES 小于等于0，立即开始下一轮优选");
+                return;
+            }
+
+            if (!AppConfig.EnableSupplementalHttpCheck)
+            {
+                Console.WriteLine($"等待{AppConfig.RunMinutes}分钟");
+                await Task.Delay(regularInterval);
+                return;
+            }
+
+            var nextRunAt = DateTimeOffset.Now.Add(regularInterval);
+            if (selectedIp == null)
+            {
+                Console.WriteLine($"等待{AppConfig.RunMinutes}分钟；本轮没有可用IP，将在{SupplementalHttpCheckInterval.TotalMinutes:0}分钟后触发重新优选");
+            }
+            else
+            {
+                Console.WriteLine($"等待{AppConfig.RunMinutes}分钟；期间每{SupplementalHttpCheckInterval.TotalMinutes:0}分钟对 {selectedIp} 进行补充HTTP检查");
+            }
+
+            while (true)
+            {
+                var remaining = nextRunAt - DateTimeOffset.Now;
+                if (remaining <= TimeSpan.Zero)
+                {
+                    Console.WriteLine("到达定时优选时间，开始下一轮优选");
+                    return;
+                }
+
+                var delay = remaining < SupplementalHttpCheckInterval
+                    ? remaining
+                    : SupplementalHttpCheckInterval;
+                await Task.Delay(delay);
+
+                if (DateTimeOffset.Now >= nextRunAt)
+                {
+                    Console.WriteLine("到达定时优选时间，开始下一轮优选");
+                    return;
+                }
+
+                if (selectedIp == null)
+                {
+                    Console.WriteLine("本轮没有可用于补充HTTP检查的IP，触发重新优选并重新计时");
+                    return;
+                }
+
+                var healthy = await RunSupplementalHttpCheck(selectedIp);
+                if (!healthy)
+                {
+                    Console.WriteLine($"补充HTTP检查连续{SupplementalHttpCheckCount}次失败，立即开始重新优选并重新计时");
+                    return;
+                }
+            }
+        }
+
+        private static async Task<bool> RunSupplementalHttpCheck(IPAddress selectedIp)
+        {
+            Console.WriteLine($"补充HTTP检查：{selectedIp}，最多{SupplementalHttpCheckCount}次，任意一次成功即通过");
+
+            var httpPing = new Httping();
+            for (int attempt = 1; attempt <= SupplementalHttpCheckCount; attempt++)
+            {
+                var result = await httpPing.SinglePing(selectedIp);
+                if (result.success)
+                {
+                    Console.WriteLine($"补充HTTP检查 [{attempt}/{SupplementalHttpCheckCount}] 成功，HTTP延迟：{result.delay.TotalMilliseconds:0.00}ms");
+                    return true;
+                }
+
+                Console.WriteLine($"补充HTTP检查 [{attempt}/{SupplementalHttpCheckCount}] 失败");
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -226,7 +313,7 @@ namespace CloudflareFastCDN
             return shuffledData.Take(sampleSize).ToList();
         }
 
-        private static async Task SingleSelect()
+        private static async Task<IPAddress?> SingleSelect()
         {
             var processor = new IPProcessor();
 
@@ -285,7 +372,7 @@ namespace CloudflareFastCDN
             if (!httpCandidates.Any())
             {
                 Console.WriteLine("没有IP进入HTTP验证阶段");
-                return;
+                return null;
             }
 
             Console.WriteLine($"开始最终检查：{httpCandidates.Count}个候选IP进行HTTP验证，每个IP检测{HttpProbeCount}次，至少成功{HttpMinSuccessCount}次，当前模式：{(AppConfig.BandwidthPriority ? "带宽优先" : "延迟优先")}");
@@ -375,6 +462,7 @@ namespace CloudflareFastCDN
             }
 
             var domainGroups = new[] { AppConfig.Domains, AppConfig.Domains2, AppConfig.Domains3 };
+            var selectedIp = topNData.FirstOrDefault()?.IP;
 
             if (topNData.Count > 0)
             {
@@ -428,6 +516,7 @@ namespace CloudflareFastCDN
             }
 
             Console.WriteLine("单次执行完毕");
+            return selectedIp;
 
             //取前100个进行http测试
             //foreach (var ip in topPings)
