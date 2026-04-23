@@ -1,7 +1,6 @@
-﻿using CloudflareFastCDN.Services;
+using CloudflareFastCDN.Services;
 using CloudflareFastCDN.Utils;
 using System.Net;
-
 
 namespace CloudflareFastCDN
 {
@@ -23,40 +22,24 @@ namespace CloudflareFastCDN
             MainAsync(args).GetAwaiter().GetResult();
         }
 
-
         static async Task MainAsync(string[] args)
         {
             bool isDocker = File.Exists("/.dockerenv");
             var config = LoadConfiguration(args, isDocker);
+            ApplyConfiguration(config);
 
-            if (string.IsNullOrWhiteSpace(config.CloudflareKey))
+            List<DnsUpdateProvider> dnsUpdateProviders;
+            try
             {
-                Console.WriteLine("缺少CFKEY");
+                dnsUpdateProviders = BuildDnsUpdateProviders();
+            }
+            catch (InvalidOperationException ex)
+            {
+                Console.WriteLine(ex.Message);
                 return;
             }
-            if (string.IsNullOrWhiteSpace(config.Domains))
-            {
-                Console.WriteLine("缺少DOMAINS");
-                return;
-            }
 
-            AppConfig.CloudflareKey = config.CloudflareKey!;
-            AppConfig.Domains = config.Domains!.Split(',').Select(d => d.Trim()).Where(d => !string.IsNullOrEmpty(d)).ToArray();
-            AppConfig.Domains2 = string.IsNullOrWhiteSpace(config.Domains2) ? null : config.Domains2.Split(',').Select(d => d.Trim()).Where(d => !string.IsNullOrEmpty(d)).ToArray();
-            AppConfig.Domains3 = string.IsNullOrWhiteSpace(config.Domains3) ? null : config.Domains3.Split(',').Select(d => d.Trim()).Where(d => !string.IsNullOrEmpty(d)).ToArray();
-            AppConfig.PingThreads = ParseWithDefault(config.PingThreads, 8);
-            AppConfig.MaxIps = ParseWithDefault(config.MaxIps, 400);
-            AppConfig.PingIntervalMs = ParseWithDefault(config.PingIntervalMs, 150);
-            AppConfig.HttpProbeUrl = string.IsNullOrWhiteSpace(config.HttpProbeUrl) ? "https://www.visa.cn/" : config.HttpProbeUrl.Trim();
-            AppConfig.HttpProbeTimeoutMs = ParsePositiveIntWithDefault(config.HttpProbeTimeoutMs, 4000);
-            AppConfig.HttpSpeedTestTimeoutMs = ParsePositiveIntWithDefault(config.HttpSpeedTestTimeoutMs, 10000);
-            AppConfig.HttpSpeedTestIdleTimeoutMs = ParsePositiveIntWithDefault(config.HttpSpeedTestIdleTimeoutMs, 3000);
-            AppConfig.RunMinutes = ParseWithDefault(config.RunMinutes, 30);
-            AppConfig.BandwidthPriority = ParseWithDefault(config.BandwidthPriority, false);
-            AppConfig.UpdateIPList = ParseWithDefault(config.UpdateIPList, false);
-            AppConfig.EnableSupplementalHttpCheck = ParseWithDefault(config.EnableSupplementalHttpCheck, false);
-
-            PrintStartupConfiguration(isDocker);
+            PrintStartupConfiguration(isDocker, dnsUpdateProviders);
 
             if (AppConfig.UpdateIPList)
             {
@@ -65,133 +48,246 @@ namespace CloudflareFastCDN
 
             while (true)
             {
-                var selectedIp = await SingleSelect();
+                var selectedIp = await SingleSelect(dnsUpdateProviders);
                 await WaitForNextSelection(selectedIp);
             }
         }
 
-        static (string? CloudflareKey, string? Domains, string? Domains2, string? Domains3, string? PingThreads, string? MaxIps, string? PingIntervalMs, string? HttpProbeUrl, string? HttpProbeTimeoutMs, string? HttpSpeedTestTimeoutMs, string? HttpSpeedTestIdleTimeoutMs, string? RunMinutes, string? BandwidthPriority, string? UpdateIPList, string? EnableSupplementalHttpCheck) LoadConfiguration(string[] args, bool isDocker)
+        private static ConfigurationData LoadConfiguration(string[] args, bool isDocker)
         {
-            string? cfKey, domains, domains2, domains3, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, httpProbeTimeoutMs, httpSpeedTestTimeoutMs, httpSpeedTestIdleTimeoutMs, runMinutes, bandwidthPriority, updateIPList, enableSupplementalHttpCheck;
-
+            string? debugCloudflareKey = null;
+            string? debugDomains = null;
 #if DEBUG
-            cfKey = File.ReadAllText("CLOUDFLARE_KEY.txt");
-            domains = File.ReadAllText("DOMAINS.txt");
-            domains2 = null;
-            domains3 = null;
-            pingThreads = "8";
-            maxIps = "400";
-            pingIntervalMs = "150";
-            httpProbeUrl = "https://www.visa.cn/";
-            httpProbeTimeoutMs = "4000";
-            httpSpeedTestTimeoutMs = "10000";
-            httpSpeedTestIdleTimeoutMs = "3000";
-            runMinutes = "30";
-            bandwidthPriority = "false";
-            updateIPList = "false";
-            enableSupplementalHttpCheck = "false";
-#else
-    cfKey = Environment.GetEnvironmentVariable("CLOUDFLARE_KEY");
-    domains = Environment.GetEnvironmentVariable("DOMAINS");
-    domains2 = Environment.GetEnvironmentVariable("DOMAINS2");
-    domains3 = Environment.GetEnvironmentVariable("DOMAINS3");
-    pingThreads = Environment.GetEnvironmentVariable("PING_THREADS");
-    maxIps = Environment.GetEnvironmentVariable("MAX_IPS");
-    pingIntervalMs = Environment.GetEnvironmentVariable("PING_INTERVAL_MS");
-    httpProbeUrl = Environment.GetEnvironmentVariable("HTTP_PROBE_URL");
-    httpProbeTimeoutMs = Environment.GetEnvironmentVariable("HTTP_PROBE_TIMEOUT_MS");
-    httpSpeedTestTimeoutMs = Environment.GetEnvironmentVariable("HTTP_SPEEDTEST_TIMEOUT_MS");
-    httpSpeedTestIdleTimeoutMs = Environment.GetEnvironmentVariable("HTTP_SPEEDTEST_IDLE_TIMEOUT_MS");
-    runMinutes = Environment.GetEnvironmentVariable("RUN_MINUTES");
-    bandwidthPriority = Environment.GetEnvironmentVariable("BANDWIDTH_PRIORITY");
-    updateIPList = Environment.GetEnvironmentVariable("UPDATE_IP_LIST");
-    enableSupplementalHttpCheck = Environment.GetEnvironmentVariable("ENABLE_SUPPLEMENTAL_HTTP_CHECK");
+            debugCloudflareKey = TryReadTextFile("CLOUDFLARE_KEY.txt");
+            debugDomains = TryReadTextFile("DOMAINS.txt");
 #endif
 
-            if (!isDocker && string.IsNullOrWhiteSpace(cfKey))
+            var parameters = !isDocker ? ParseCommandLineArgs(args) : new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
+            string? ResolveSetting(string key, string? defaultValue = null)
             {
-                var parameters = ParseCommandLineArgs(args);
-                cfKey = parameters.GetValueOrDefault("CLOUDFLARE_KEY", cfKey);
-                domains = parameters.GetValueOrDefault("DOMAINS", domains);
-                domains2 = parameters.GetValueOrDefault("DOMAINS2", domains2);
-                domains3 = parameters.GetValueOrDefault("DOMAINS3", domains3);
-                pingThreads = parameters.GetValueOrDefault("PING_THREADS", pingThreads);
-                maxIps = parameters.GetValueOrDefault("MAX_IPS", maxIps);
-                pingIntervalMs = parameters.GetValueOrDefault("PING_INTERVAL_MS", pingIntervalMs);
-                httpProbeUrl = parameters.GetValueOrDefault("HTTP_PROBE_URL", httpProbeUrl);
-                httpProbeTimeoutMs = parameters.GetValueOrDefault("HTTP_PROBE_TIMEOUT_MS", httpProbeTimeoutMs);
-                httpSpeedTestTimeoutMs = parameters.GetValueOrDefault("HTTP_SPEEDTEST_TIMEOUT_MS", httpSpeedTestTimeoutMs);
-                httpSpeedTestIdleTimeoutMs = parameters.GetValueOrDefault("HTTP_SPEEDTEST_IDLE_TIMEOUT_MS", httpSpeedTestIdleTimeoutMs);
-                runMinutes = parameters.GetValueOrDefault("RUN_MINUTES", runMinutes);
-                bandwidthPriority = parameters.GetValueOrDefault("BANDWIDTH_PRIORITY", bandwidthPriority);
-                updateIPList = parameters.GetValueOrDefault("UPDATE_IP_LIST", updateIPList);
-                enableSupplementalHttpCheck = parameters.GetValueOrDefault("ENABLE_SUPPLEMENTAL_HTTP_CHECK", enableSupplementalHttpCheck);
+                var environmentValue = Environment.GetEnvironmentVariable(key);
+                if (!string.IsNullOrWhiteSpace(environmentValue))
+                {
+                    return environmentValue;
+                }
+
+                if (!isDocker &&
+                    parameters.TryGetValue(key, out var argumentValue) &&
+                    !string.IsNullOrWhiteSpace(argumentValue))
+                {
+                    return argumentValue;
+                }
+
+                return defaultValue;
             }
 
-            return (cfKey, domains, domains2, domains3, pingThreads, maxIps, pingIntervalMs, httpProbeUrl, httpProbeTimeoutMs, httpSpeedTestTimeoutMs, httpSpeedTestIdleTimeoutMs, runMinutes, bandwidthPriority, updateIPList, enableSupplementalHttpCheck);
+            return new ConfigurationData
+            {
+                CloudflareKey = ResolveSetting("CLOUDFLARE_KEY", debugCloudflareKey),
+                TencentCloudSecretId = ResolveSetting("TENCENTCLOUD_SECRET_ID"),
+                TencentCloudSecretKey = ResolveSetting("TENCENTCLOUD_SECRET_KEY"),
+                AlibabaCloudAccessKeyId = ResolveSetting("ALIBABACLOUD_ACCESS_KEY_ID"),
+                AlibabaCloudAccessKeySecret = ResolveSetting("ALIBABACLOUD_ACCESS_KEY_SECRET"),
+                CloudflareDomains = FirstNonEmpty(ResolveSetting("CLOUDFLARE_DOMAINS"), ResolveSetting("DOMAINS", debugDomains)),
+                CloudflareDomains2 = FirstNonEmpty(ResolveSetting("CLOUDFLARE_DOMAINS2"), ResolveSetting("DOMAINS2")),
+                CloudflareDomains3 = FirstNonEmpty(ResolveSetting("CLOUDFLARE_DOMAINS3"), ResolveSetting("DOMAINS3")),
+                TencentCloudDomains = ResolveSetting("TENCENTCLOUD_DOMAINS"),
+                TencentCloudDomains2 = ResolveSetting("TENCENTCLOUD_DOMAINS2"),
+                TencentCloudDomains3 = ResolveSetting("TENCENTCLOUD_DOMAINS3"),
+                AlibabaCloudDomains = ResolveSetting("ALIBABACLOUD_DOMAINS"),
+                AlibabaCloudDomains2 = ResolveSetting("ALIBABACLOUD_DOMAINS2"),
+                AlibabaCloudDomains3 = ResolveSetting("ALIBABACLOUD_DOMAINS3"),
+                PingThreads = ResolveSetting("PING_THREADS", "8"),
+                MaxIps = ResolveSetting("MAX_IPS", "400"),
+                PingIntervalMs = ResolveSetting("PING_INTERVAL_MS", "150"),
+                HttpProbeUrl = ResolveSetting("HTTP_PROBE_URL", "https://www.visa.cn/"),
+                HttpProbeTimeoutMs = ResolveSetting("HTTP_PROBE_TIMEOUT_MS", "4000"),
+                HttpSpeedTestTimeoutMs = ResolveSetting("HTTP_SPEEDTEST_TIMEOUT_MS", "10000"),
+                HttpSpeedTestIdleTimeoutMs = ResolveSetting("HTTP_SPEEDTEST_IDLE_TIMEOUT_MS", "3000"),
+                RunMinutes = ResolveSetting("RUN_MINUTES", "30"),
+                BandwidthPriority = ResolveSetting("BANDWIDTH_PRIORITY", "false"),
+                UpdateIPList = ResolveSetting("UPDATE_IP_LIST", "false"),
+                EnableSupplementalHttpCheck = ResolveSetting("ENABLE_SUPPLEMENTAL_HTTP_CHECK", "false")
+            };
         }
 
-
-
-        static T ParseWithDefault<T>(string? value, T defaultValue)
+        private static void ApplyConfiguration(ConfigurationData config)
         {
-            if (typeof(T) == typeof(int))
-            {
-                if (int.TryParse(value, out int intResult))
-                {
-                    return (T)(object)(intResult == 0 ? (int)(object)defaultValue : intResult);
-                }
-            }
-            else if (typeof(T) == typeof(bool))
-            {
-                if (bool.TryParse(value, out bool boolResult))
-                {
-                    return (T)(object)boolResult;
-                }
-            }
-            return defaultValue;
+            AppConfig.CloudflareKey = config.CloudflareKey?.Trim() ?? string.Empty;
+            AppConfig.TencentCloudSecretId = config.TencentCloudSecretId?.Trim() ?? string.Empty;
+            AppConfig.TencentCloudSecretKey = config.TencentCloudSecretKey?.Trim() ?? string.Empty;
+            AppConfig.AlibabaCloudAccessKeyId = config.AlibabaCloudAccessKeyId?.Trim() ?? string.Empty;
+            AppConfig.AlibabaCloudAccessKeySecret = config.AlibabaCloudAccessKeySecret?.Trim() ?? string.Empty;
+
+            AppConfig.CloudflareDomains = ParseDomainList(config.CloudflareDomains);
+            AppConfig.CloudflareDomains2 = ParseDomainList(config.CloudflareDomains2);
+            AppConfig.CloudflareDomains3 = ParseDomainList(config.CloudflareDomains3);
+            AppConfig.TencentCloudDomains = ParseDomainList(config.TencentCloudDomains);
+            AppConfig.TencentCloudDomains2 = ParseDomainList(config.TencentCloudDomains2);
+            AppConfig.TencentCloudDomains3 = ParseDomainList(config.TencentCloudDomains3);
+            AppConfig.AlibabaCloudDomains = ParseDomainList(config.AlibabaCloudDomains);
+            AppConfig.AlibabaCloudDomains2 = ParseDomainList(config.AlibabaCloudDomains2);
+            AppConfig.AlibabaCloudDomains3 = ParseDomainList(config.AlibabaCloudDomains3);
+
+            AppConfig.PingThreads = ParseNonZeroIntWithDefault(config.PingThreads, 8);
+            AppConfig.MaxIps = ParseNonZeroIntWithDefault(config.MaxIps, 400);
+            AppConfig.PingIntervalMs = ParseNonZeroIntWithDefault(config.PingIntervalMs, 150);
+            AppConfig.HttpProbeUrl = string.IsNullOrWhiteSpace(config.HttpProbeUrl) ? "https://www.visa.cn/" : config.HttpProbeUrl.Trim();
+            AppConfig.HttpProbeTimeoutMs = ParsePositiveIntWithDefault(config.HttpProbeTimeoutMs, 4000);
+            AppConfig.HttpSpeedTestTimeoutMs = ParsePositiveIntWithDefault(config.HttpSpeedTestTimeoutMs, 10000);
+            AppConfig.HttpSpeedTestIdleTimeoutMs = ParsePositiveIntWithDefault(config.HttpSpeedTestIdleTimeoutMs, 3000);
+            AppConfig.RunMinutes = ParseNonZeroIntWithDefault(config.RunMinutes, 30);
+            AppConfig.BandwidthPriority = ParseBoolWithDefault(config.BandwidthPriority, false);
+            AppConfig.UpdateIPList = ParseBoolWithDefault(config.UpdateIPList, false);
+            AppConfig.EnableSupplementalHttpCheck = ParseBoolWithDefault(config.EnableSupplementalHttpCheck, false);
         }
 
-        static int ParsePositiveIntWithDefault(string? value, int defaultValue)
+        private static List<DnsUpdateProvider> BuildDnsUpdateProviders()
         {
-            return int.TryParse(value, out int result) && result > 0
-                ? result
-                : defaultValue;
+            var providers = new List<DnsUpdateProvider>();
+
+            if (HasAnyDomains(AppConfig.CloudflareDomains, AppConfig.CloudflareDomains2, AppConfig.CloudflareDomains3))
+            {
+                if (string.IsNullOrWhiteSpace(AppConfig.CloudflareKey))
+                {
+                    throw new InvalidOperationException("配置了 CLOUDFLARE_DOMAINS*，但缺少 CLOUDFLARE_KEY");
+                }
+
+                providers.Add(new DnsUpdateProvider(
+                    "Cloudflare",
+                    "CLOUDFLARE",
+                    new CloudflareAPIManager(AppConfig.CloudflareKey),
+                    AppConfig.CloudflareDomains,
+                    AppConfig.CloudflareDomains2,
+                    AppConfig.CloudflareDomains3));
+            }
+
+            if (HasAnyDomains(AppConfig.TencentCloudDomains, AppConfig.TencentCloudDomains2, AppConfig.TencentCloudDomains3))
+            {
+                if (string.IsNullOrWhiteSpace(AppConfig.TencentCloudSecretId) ||
+                    string.IsNullOrWhiteSpace(AppConfig.TencentCloudSecretKey))
+                {
+                    throw new InvalidOperationException("配置了 TENCENTCLOUD_DOMAINS*，但缺少 TENCENTCLOUD_SECRET_ID 或 TENCENTCLOUD_SECRET_KEY");
+                }
+
+                providers.Add(new DnsUpdateProvider(
+                    "TencentCloud",
+                    "TENCENTCLOUD",
+                    new TencentCloudDnsManager(AppConfig.TencentCloudSecretId, AppConfig.TencentCloudSecretKey),
+                    AppConfig.TencentCloudDomains,
+                    AppConfig.TencentCloudDomains2,
+                    AppConfig.TencentCloudDomains3));
+            }
+
+            if (HasAnyDomains(AppConfig.AlibabaCloudDomains, AppConfig.AlibabaCloudDomains2, AppConfig.AlibabaCloudDomains3))
+            {
+                if (string.IsNullOrWhiteSpace(AppConfig.AlibabaCloudAccessKeyId) ||
+                    string.IsNullOrWhiteSpace(AppConfig.AlibabaCloudAccessKeySecret))
+                {
+                    throw new InvalidOperationException("配置了 ALIBABACLOUD_DOMAINS*，但缺少 ALIBABACLOUD_ACCESS_KEY_ID 或 ALIBABACLOUD_ACCESS_KEY_SECRET");
+                }
+
+                providers.Add(new DnsUpdateProvider(
+                    "AlibabaCloud",
+                    "ALIBABACLOUD",
+                    new AlibabaCloudDnsManager(AppConfig.AlibabaCloudAccessKeyId, AppConfig.AlibabaCloudAccessKeySecret),
+                    AppConfig.AlibabaCloudDomains,
+                    AppConfig.AlibabaCloudDomains2,
+                    AppConfig.AlibabaCloudDomains3));
+            }
+
+            if (providers.Count == 0)
+            {
+                throw new InvalidOperationException("缺少 DNS 域名配置，请至少设置 CLOUDFLARE_DOMAINS、TENCENTCLOUD_DOMAINS、ALIBABACLOUD_DOMAINS 或兼容变量 DOMAINS 之一");
+            }
+
+            return providers;
         }
 
         private static Dictionary<string, string?> ParseCommandLineArgs(string[] args)
         {
-            Dictionary<string, string?> parameters = new Dictionary<string, string?>();
+            var parameters = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (string arg in args)
+            foreach (var arg in args)
             {
-                if (arg.StartsWith("--"))
+                if (!arg.StartsWith("--", StringComparison.Ordinal))
                 {
-                    string[] splitArg = arg.Substring(2).Split('=');
-                    if (splitArg.Length == 2)
-                    {
-                        parameters[splitArg[0]] = splitArg[1];
-                    }
+                    continue;
+                }
+
+                var splitArg = arg[2..].Split('=', 2);
+                if (splitArg.Length == 2)
+                {
+                    parameters[splitArg[0]] = splitArg[1];
                 }
             }
 
             return parameters;
         }
 
-        private static void PrintStartupConfiguration(bool isDocker)
+        private static string[] ParseDomainList(string? value)
         {
-            var maskedKey = string.IsNullOrWhiteSpace(AppConfig.CloudflareKey)
-                ? "(empty)"
-                : $"{AppConfig.CloudflareKey[..Math.Min(4, AppConfig.CloudflareKey.Length)]}***";
+            return string.IsNullOrWhiteSpace(value)
+                ? Array.Empty<string>()
+                : value
+                    .Split(',')
+                    .Select(domain => domain.Trim())
+                    .Where(domain => !string.IsNullOrWhiteSpace(domain))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+        }
 
+        private static string? TryReadTextFile(string path)
+        {
+            return File.Exists(path) ? File.ReadAllText(path).Trim() : null;
+        }
+
+        private static string? FirstNonEmpty(params string?[] values)
+        {
+            return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        }
+
+        private static int ParseNonZeroIntWithDefault(string? value, int defaultValue)
+        {
+            return int.TryParse(value, out var result) && result != 0
+                ? result
+                : defaultValue;
+        }
+
+        private static int ParsePositiveIntWithDefault(string? value, int defaultValue)
+        {
+            return int.TryParse(value, out var result) && result > 0
+                ? result
+                : defaultValue;
+        }
+
+        private static bool ParseBoolWithDefault(string? value, bool defaultValue)
+        {
+            return bool.TryParse(value, out var result) ? result : defaultValue;
+        }
+
+        private static void PrintStartupConfiguration(bool isDocker, IReadOnlyList<DnsUpdateProvider> dnsUpdateProviders)
+        {
             Console.WriteLine("启动配置：");
             Console.WriteLine($"  运行环境: {(isDocker ? "Docker" : "Local")}");
-            Console.WriteLine($"  CLOUDFLARE_KEY: {maskedKey}");
-            Console.WriteLine($"  DOMAINS: {string.Join(",", AppConfig.Domains)}");
-            if (AppConfig.Domains2 != null)
-                Console.WriteLine($"  DOMAINS2: {string.Join(",", AppConfig.Domains2)}");
-            if (AppConfig.Domains3 != null)
-                Console.WriteLine($"  DOMAINS3: {string.Join(",", AppConfig.Domains3)}");
+            Console.WriteLine($"  DNS提供商: {string.Join(", ", dnsUpdateProviders.Select(provider => provider.ProviderName))}");
+            Console.WriteLine($"  CLOUDFLARE_KEY: {MaskSecret(AppConfig.CloudflareKey)}");
+            Console.WriteLine($"  TENCENTCLOUD_SECRET_ID: {MaskSecret(AppConfig.TencentCloudSecretId)}");
+            Console.WriteLine($"  TENCENTCLOUD_SECRET_KEY: {MaskSecret(AppConfig.TencentCloudSecretKey)}");
+            Console.WriteLine($"  ALIBABACLOUD_ACCESS_KEY_ID: {MaskSecret(AppConfig.AlibabaCloudAccessKeyId)}");
+            Console.WriteLine($"  ALIBABACLOUD_ACCESS_KEY_SECRET: {MaskSecret(AppConfig.AlibabaCloudAccessKeySecret)}");
+
+            PrintDomainGroup("CLOUDFLARE_DOMAINS", AppConfig.CloudflareDomains);
+            PrintDomainGroup("CLOUDFLARE_DOMAINS2", AppConfig.CloudflareDomains2);
+            PrintDomainGroup("CLOUDFLARE_DOMAINS3", AppConfig.CloudflareDomains3);
+            PrintDomainGroup("TENCENTCLOUD_DOMAINS", AppConfig.TencentCloudDomains);
+            PrintDomainGroup("TENCENTCLOUD_DOMAINS2", AppConfig.TencentCloudDomains2);
+            PrintDomainGroup("TENCENTCLOUD_DOMAINS3", AppConfig.TencentCloudDomains3);
+            PrintDomainGroup("ALIBABACLOUD_DOMAINS", AppConfig.AlibabaCloudDomains);
+            PrintDomainGroup("ALIBABACLOUD_DOMAINS2", AppConfig.AlibabaCloudDomains2);
+            PrintDomainGroup("ALIBABACLOUD_DOMAINS3", AppConfig.AlibabaCloudDomains3);
+
             Console.WriteLine($"  PING_THREADS: {AppConfig.PingThreads}");
             Console.WriteLine($"  MAX_IPS: {AppConfig.MaxIps}");
             Console.WriteLine($"  PING_INTERVAL_MS: {AppConfig.PingIntervalMs}");
@@ -203,6 +299,29 @@ namespace CloudflareFastCDN
             Console.WriteLine($"  BANDWIDTH_PRIORITY: {AppConfig.BandwidthPriority}");
             Console.WriteLine($"  UPDATE_IP_LIST: {AppConfig.UpdateIPList}");
             Console.WriteLine($"  ENABLE_SUPPLEMENTAL_HTTP_CHECK: {AppConfig.EnableSupplementalHttpCheck}");
+        }
+
+        private static void PrintDomainGroup(string variableName, IReadOnlyCollection<string> domains)
+        {
+            if (domains.Count > 0)
+            {
+                Console.WriteLine($"  {variableName}: {string.Join(",", domains)}");
+            }
+        }
+
+        private static string MaskSecret(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return "(empty)";
+            }
+
+            return $"{value[..Math.Min(4, value.Length)]}***";
+        }
+
+        private static bool HasAnyDomains(params string[][] domainGroups)
+        {
+            return domainGroups.Any(domainGroup => domainGroup.Length > 0);
         }
 
         private static async Task WaitForNextSelection(IPAddress? selectedIp)
@@ -286,13 +405,6 @@ namespace CloudflareFastCDN
             return false;
         }
 
-        /// <summary>
-        /// 均匀取出
-        /// </summary>
-        /// <typeparam name="T"></typeparam>
-        /// <param name="sourceArray"></param>
-        /// <param name="count"></param>
-        /// <returns></returns>
         public static List<T> SampleData<T>(IList<T> sourceData, int sampleSize)
         {
             if (sampleSize >= sourceData.Count)
@@ -301,7 +413,6 @@ namespace CloudflareFastCDN
             Random random = new Random();
             List<T> shuffledData = new List<T>(sourceData);
 
-            // Fisher-Yates 洗牌算法
             for (int i = shuffledData.Count - 1; i > 0; i--)
             {
                 int j = random.Next(i + 1);
@@ -313,59 +424,48 @@ namespace CloudflareFastCDN
             return shuffledData.Take(sampleSize).ToList();
         }
 
-        private static async Task<IPAddress?> SingleSelect()
+        private static async Task<IPAddress?> SingleSelect(IReadOnlyList<DnsUpdateProvider> dnsUpdateProviders)
         {
             var processor = new IPProcessor();
 
             var subnetCache = new SubnetCache();
             subnetCache.Load();
 
-            //更新IP
-
-
             var ipAddresses = processor.LoadIPRanges();
-
-
             ipAddresses = SampleData(ipAddresses, AppConfig.MaxIps);
-
-            //TODO 精简检测的IP数量
 
             IcmpPing task = new IcmpPing(ipAddresses, FirstRoundPingCount);
             Console.WriteLine($"开始第1轮检查：全量{FirstRoundPingCount}次Ping");
-            // 先全部执行首轮 ping
-            var a = await task.RunAsync();
-            var topPings = a.Where(a => a.Sended == FirstRoundPingCount && a.Received == a.Sended).ToList();
+            var firstRoundResults = await task.RunAsync();
+            var topPings = firstRoundResults.Where(item => item.Sended == FirstRoundPingCount && item.Received == item.Sended).ToList();
             var top100Pings = topPings.Take(100);
 
             Console.WriteLine($"开始第2轮检查：Top100,{SecondRoundPingCount}次Ping，允许最多丢包{SecondRoundMaxPacketLoss}/{SecondRoundPingCount}");
-            // 对前100再次 10 ping
-            IcmpPing task100 = new IcmpPing(top100Pings.Select(a => a.IP).ToList(), SecondRoundPingCount);
-            var b = await task100.RunAsync();
-            var top100PingsSelect = b
-                .Where(a => a.Sended == SecondRoundPingCount && a.Sended - a.Received <= SecondRoundMaxPacketLoss)
+            IcmpPing top100PingTask = new IcmpPing(top100Pings.Select(item => item.IP).ToList(), SecondRoundPingCount);
+            var secondRoundResults = await top100PingTask.RunAsync();
+            var top100PingsSelect = secondRoundResults
+                .Where(item => item.Sended == SecondRoundPingCount && item.Sended - item.Received <= SecondRoundMaxPacketLoss)
                 .ToList();
 
             var httpCandidates = top100PingsSelect.Take(HttpCandidateCount).ToList();
 
-            // 子网缓存阶段：从已缓存的/24子网中随机取IP进行TcpPing，通过的加入最终候选
             var sampledSubnets = subnetCache.RandomSampleIPs(SubnetSampleCount);
             if (sampledSubnets.Any())
             {
                 Console.WriteLine($"开始子网缓存阶段：从{subnetCache.SubnetCount}个缓存/24子网中随机取出{sampledSubnets.Count}个IP进行TCP Ping验证");
-                TcpPing subnetTcpPing = new TcpPing(sampledSubnets.Select(s => s.IP).ToList(), SubnetProbePingCount);
+                TcpPing subnetTcpPing = new TcpPing(sampledSubnets.Select(item => item.IP).ToList(), SubnetProbePingCount);
                 var subnetResults = await subnetTcpPing.RunAsync();
-                var subnetPassed = subnetResults.Where(r => r.Received > 0).ToList();
+                var subnetPassed = subnetResults.Where(result => result.Received > 0).ToList();
                 Console.WriteLine($"子网缓存阶段：{subnetPassed.Count}/{sampledSubnets.Count}个IP通过TCP Ping，加入最终候选");
 
-                // 更新连续失败计数，淘汰连续3次失败的子网
-                bool evicted = subnetCache.RecordTcpPingOutcomes(sampledSubnets, subnetPassed.Select(r => r.IP));
+                bool evicted = subnetCache.RecordTcpPingOutcomes(sampledSubnets, subnetPassed.Select(result => result.IP));
                 if (evicted || subnetPassed.Count < sampledSubnets.Count)
                     subnetCache.Save();
 
-                foreach (var passedIP in subnetPassed)
+                foreach (var passedIp in subnetPassed)
                 {
-                    if (!httpCandidates.Any(c => c.IP.Equals(passedIP.IP)))
-                        httpCandidates.Add(passedIP);
+                    if (!httpCandidates.Any(candidate => candidate.IP.Equals(passedIp.IP)))
+                        httpCandidates.Add(passedIp);
                 }
             }
 
@@ -400,7 +500,7 @@ namespace CloudflareFastCDN
             {
                 if (!AppConfig.BandwidthPriority)
                 {
-                    topHttpList.Sort((a, b) => a.Delay.TotalMicroseconds.CompareTo(b.Delay.TotalMicroseconds));
+                    topHttpList.Sort((left, right) => left.Delay.TotalMicroseconds.CompareTo(right.Delay.TotalMicroseconds));
                     topNData = topHttpList.Take(3).ToList();
 
                     if (topNData.Count > 0)
@@ -410,7 +510,7 @@ namespace CloudflareFastCDN
                 }
                 else
                 {
-                    var speedRankedList = new List<(PingData data, double mbps, long bytesRead, TimeSpan duration)>();
+                    var speedRankedList = new List<(PingData Data, double Mbps, long BytesRead, TimeSpan Duration)>();
                     foreach (var ip in topHttpList)
                     {
                         var speedResult = await httpPing.SpeedTest(ip.IP);
@@ -434,19 +534,18 @@ namespace CloudflareFastCDN
 
                     if (speedRankedList.Any())
                     {
-                        speedRankedList.Sort((a, b) =>
+                        speedRankedList.Sort((left, right) =>
                         {
-                            var speedCompare = b.mbps.CompareTo(a.mbps);
-                            return speedCompare != 0 ? speedCompare : a.data.Delay.CompareTo(b.data.Delay);
+                            var speedCompare = right.Mbps.CompareTo(left.Mbps);
+                            return speedCompare != 0 ? speedCompare : left.Data.Delay.CompareTo(right.Data.Delay);
                         });
 
-                        topNData = speedRankedList.Take(3).Select(r => r.data).ToList();
-                        Console.WriteLine($"最终按下载带宽选择IP {topNData[0].IP} {speedRankedList[0].mbps:0.00} Mbps");
+                        topNData = speedRankedList.Take(3).Select(result => result.Data).ToList();
+                        Console.WriteLine($"最终按下载带宽选择IP {topNData[0].IP} {speedRankedList[0].Mbps:0.00} Mbps");
                     }
                     else
                     {
-                        // /speedtest 不存在或下载测速全部失败时，回退到原有 HTTP 延迟逻辑
-                        topHttpList.Sort((a, b) => a.Delay.TotalMicroseconds.CompareTo(b.Delay.TotalMicroseconds));
+                        topHttpList.Sort((left, right) => left.Delay.TotalMicroseconds.CompareTo(right.Delay.TotalMicroseconds));
                         topNData = topHttpList.Take(3).ToList();
 
                         if (topNData.Count > 0)
@@ -461,13 +560,11 @@ namespace CloudflareFastCDN
                 topNData = new List<PingData>();
             }
 
-            var domainGroups = new[] { AppConfig.Domains, AppConfig.Domains2, AppConfig.Domains3 };
             var selectedIp = topNData.FirstOrDefault()?.IP;
 
             if (topNData.Count > 0)
             {
                 var top1Data = topNData[0];
-                // 缓存最优IP所在/24子网（按HTTP延迟排序存储，最多10条）
                 var subnet24 = subnetCache.GetSubnet24(top1Data.IP);
                 if (subnet24 != null)
                 {
@@ -476,36 +573,42 @@ namespace CloudflareFastCDN
                     Console.WriteLine($"已缓存子网 {subnet24} (HTTP延迟 {top1Data.Delay.TotalMilliseconds:0.00}ms，当前共{subnetCache.SubnetCount}个缓存子网)");
                 }
 
-                // 更新 DOMAINS / DOMAINS2 / DOMAINS3 对应排名 1 / 2 / 3 的 IP
-                for (int rank = 0; rank < domainGroups.Length; rank++)
+                for (int rank = 0; rank < 3; rank++)
                 {
-                    var domains = domainGroups[rank];
-                    if (domains == null || domains.Length == 0) continue;
-                    if (rank >= topNData.Count)
+                    foreach (var dnsUpdateProvider in dnsUpdateProviders)
                     {
-                        Console.WriteLine($"可用IP不足，跳过 DOMAINS{(rank == 0 ? "" : rank.ToString())} 的DNS更新（需要第{rank + 1}名，实际只有{topNData.Count}个）");
-                        break;
-                    }
-
-                    var ip = topNData[rank];
-                    foreach (var domain in domains)
-                    {
-                        try
+                        var domains = dnsUpdateProvider.GetDomains(rank);
+                        if (domains.Length == 0)
                         {
-                            Console.WriteLine($"开始更新域名 {domain} {ip.IP}（第{rank + 1}名）");
-                            var updated = await CloudflareAPIManager.Instance.AddOrUpdateARecord(domain, ip.IP.ToString());
-                            if (updated)
-                            {
-                                Console.WriteLine($"已完成更新域名 {domain}");
-                            }
-                            else
-                            {
-                                Console.WriteLine($"更新域名失败 {domain}");
-                            }
+                            continue;
                         }
-                        catch (Exception ex)
+
+                        if (rank >= topNData.Count)
                         {
-                            Console.WriteLine(ex.ToString());
+                            Console.WriteLine($"可用IP不足，跳过 {dnsUpdateProvider.GetVariableName(rank)} 的DNS更新（需要第{rank + 1}名，实际只有{topNData.Count}个）");
+                            continue;
+                        }
+
+                        var rankedIp = topNData[rank];
+                        foreach (var domain in domains)
+                        {
+                            try
+                            {
+                                Console.WriteLine($"开始更新[{dnsUpdateProvider.ProviderName}]域名 {domain} {rankedIp.IP}（第{rank + 1}名）");
+                                var updated = await dnsUpdateProvider.Manager.AddOrUpdateARecord(domain, rankedIp.IP.ToString());
+                                if (updated)
+                                {
+                                    Console.WriteLine($"已完成更新[{dnsUpdateProvider.ProviderName}]域名 {domain}");
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"更新[{dnsUpdateProvider.ProviderName}]域名失败 {domain}");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine(ex.ToString());
+                            }
                         }
                     }
                 }
@@ -517,15 +620,64 @@ namespace CloudflareFastCDN
 
             Console.WriteLine("单次执行完毕");
             return selectedIp;
-
-            //取前100个进行http测试
-            //foreach (var ip in topPings)
-            //{
-            //    var ping = new Httping();
-            //    var bn = ping.Ping(ip.IP).Result;
-            //    Console.WriteLine($"{ip.IP} TCP延时{ip.Delay.TotalMilliseconds} HTTP延时{bn.Item2.TotalMilliseconds} HTTP成功{bn.Item1}");
-            //}
         }
 
+        private sealed class ConfigurationData
+        {
+            public string? CloudflareKey { get; init; }
+            public string? TencentCloudSecretId { get; init; }
+            public string? TencentCloudSecretKey { get; init; }
+            public string? AlibabaCloudAccessKeyId { get; init; }
+            public string? AlibabaCloudAccessKeySecret { get; init; }
+            public string? CloudflareDomains { get; init; }
+            public string? CloudflareDomains2 { get; init; }
+            public string? CloudflareDomains3 { get; init; }
+            public string? TencentCloudDomains { get; init; }
+            public string? TencentCloudDomains2 { get; init; }
+            public string? TencentCloudDomains3 { get; init; }
+            public string? AlibabaCloudDomains { get; init; }
+            public string? AlibabaCloudDomains2 { get; init; }
+            public string? AlibabaCloudDomains3 { get; init; }
+            public string? PingThreads { get; init; }
+            public string? MaxIps { get; init; }
+            public string? PingIntervalMs { get; init; }
+            public string? HttpProbeUrl { get; init; }
+            public string? HttpProbeTimeoutMs { get; init; }
+            public string? HttpSpeedTestTimeoutMs { get; init; }
+            public string? HttpSpeedTestIdleTimeoutMs { get; init; }
+            public string? RunMinutes { get; init; }
+            public string? BandwidthPriority { get; init; }
+            public string? UpdateIPList { get; init; }
+            public string? EnableSupplementalHttpCheck { get; init; }
+        }
+
+        private sealed class DnsUpdateProvider
+        {
+            private readonly string[][] _domainGroups;
+
+            public DnsUpdateProvider(string providerName, string variablePrefix, IDnsRecordManager manager, params string[][] domainGroups)
+            {
+                ProviderName = providerName;
+                VariablePrefix = variablePrefix;
+                Manager = manager;
+                _domainGroups = domainGroups;
+            }
+
+            public string ProviderName { get; }
+            public string VariablePrefix { get; }
+            public IDnsRecordManager Manager { get; }
+
+            public string[] GetDomains(int rank)
+            {
+                return rank >= 0 && rank < _domainGroups.Length
+                    ? _domainGroups[rank]
+                    : Array.Empty<string>();
+            }
+
+            public string GetVariableName(int rank)
+            {
+                return $"{VariablePrefix}_DOMAINS{(rank == 0 ? string.Empty : (rank + 1).ToString())}";
+            }
+        }
     }
 }
