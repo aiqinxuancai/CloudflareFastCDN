@@ -2,6 +2,8 @@
 
 自动优选 Cloudflare CDN IP 并更新 DNS A 记录。支持 Cloudflare、腾讯云 DNSPod、阿里云解析。
 
+推荐阅读：[试试Cloudflare IP优选！让Cloudflare在国内再也不是减速器！](https://2x.nz/posts/cf-fastip/)
+
 ## 工作原理
 
 1. 从 Cloudflare IPv4 网段按 `/24` 子网抽样
