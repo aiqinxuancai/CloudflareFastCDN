@@ -400,7 +400,7 @@ namespace CloudflareFastCDN
                     return true;
                 }
 
-                Console.WriteLine($"补充HTTP检查 [{attempt}/{SupplementalHttpCheckCount}] 失败");
+                Console.WriteLine($"补充HTTP检查 [{attempt}/{SupplementalHttpCheckCount}] 失败：{FormatError(result.error)}");
             }
 
             return false;
@@ -488,7 +488,8 @@ namespace CloudflareFastCDN
                     ? TimeSpan.FromMilliseconds(pingResult.totalDelay.TotalMilliseconds / pingResult.success)
                     : TimeSpan.Zero;
 
-                Console.WriteLine($"最终结果 [{count}] {ip.IP} HTTP成功：{pingResult.success}/{HttpProbeCount} HTTP均延时：{averageDelay.TotalMilliseconds}ms");
+                var errorMessage = pingResult.success >= HttpProbeCount ? string.Empty : $" 失败原因：{FormatError(pingResult.error)}";
+                Console.WriteLine($"最终结果 [{count}] {ip.IP} HTTP成功：{pingResult.success}/{HttpProbeCount} HTTP均延时：{averageDelay.TotalMilliseconds}ms{errorMessage}");
                 if (pingResult.success >= HttpMinSuccessCount)
                 {
                     ip.Delay = averageDelay;
@@ -526,11 +527,11 @@ namespace CloudflareFastCDN
                         {
                             if (speedResult.missing)
                             {
-                                Console.WriteLine($"测速文件不存在，跳过下载测速 {ip.IP} /speedtest");
+                                Console.WriteLine($"测速文件不存在，跳过下载测速 {ip.IP} /speedtest，原因：{FormatError(speedResult.error)}");
                             }
                             else
                             {
-                                Console.WriteLine($"下载测速失败 {ip.IP}");
+                                Console.WriteLine($"下载测速失败 {ip.IP}，原因：{FormatError(speedResult.error)}");
                             }
 
                         }
@@ -664,6 +665,11 @@ namespace CloudflareFastCDN
             public string? BandwidthPriority { get; init; }
             public string? UpdateIPList { get; init; }
             public string? EnableSupplementalHttpCheck { get; init; }
+        }
+
+        private static string FormatError(string? error)
+        {
+            return string.IsNullOrWhiteSpace(error) ? "Unknown" : error;
         }
 
         private sealed class DnsUpdateProvider
