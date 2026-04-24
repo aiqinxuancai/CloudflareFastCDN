@@ -1,114 +1,37 @@
 # CloudflareFastCDN
 
-使用 Cloudflare 公布的 IPv4 网段，从每个 `/24` 子网中抽取一个 IP，先进行多轮 ICMP Ping，再对候选 IP 做 HTTP 连通性验证，最终把优选出的 Cloudflare CDN IP 更新到指定 DNS 服务商的 A 记录。
+自动优选 Cloudflare CDN IP 并更新 DNS A 记录。支持 Cloudflare、腾讯云 DNSPod、阿里云解析。
 
-目前仅支持 IPv4；DNS 更新支持 Cloudflare、腾讯云 DNSPod、阿里云解析，均通过 HTTPS OpenAPI 直接调用，不依赖云厂商 SDK。
+## 工作原理
 
-## 工作流程
+1. 从 Cloudflare IPv4 网段按 `/24` 子网抽样
+2. 多轮 ICMP Ping 筛选低延迟候选 IP
+3. HTTP 连通性验证，可选带宽测速（`BANDWIDTH_PRIORITY=true`）
+4. 子网缓存（`subnet_cache.json`）加速历史优质节点复用
+5. 按排名依次更新 `*_DOMAINS` / `*_DOMAINS2` / `*_DOMAINS3` 的 A 记录
+6. 等待 `RUN_MINUTES` 后自动进入下一轮；启用补充检查时，等待期间每 5 分钟验证一次当前最优 IP
 
-1. 从 Cloudflare IPv4 网段中抽样出待测 IP。
-2. 第 1 轮对全部候选做 4 次 ICMP Ping。
-3. 第 2 轮对前 100 个结果做 10 次 ICMP Ping，进一步筛掉丢包较高的 IP。
-4. **子网缓存阶段**：从历史优选中积累的最多 10 个 `/24` 子网里随机抽取最多 3 个 IP，进行 TCP Ping 连通性验证，通过的直接加入最终候选列表。子网缓存按 HTTP 延迟升序排序，持久化在 `subnet_cache.json`（Docker 下为 `/data/subnet_cache.json`）。
-5. 对最终候选 IP 做 HTTP 验证：当前轮 Ping 结果保留 7 个，子网缓存最多补充 3 个，总量最多 10 个；每个候选节点之间间隔 5 秒再继续。
-6. 根据 `BANDWIDTH_PRIORITY` 决定最终挑选方式：
-   - `false`：只按 HTTP 延迟最小选择，保持旧逻辑。
-   - `true`：在 HTTP 验证通过后，尝试访问 `HTTP_PROBE_URL` 同域名下的 `/speedtest` 文件并做下载测速，优先选择带宽最高的 IP；测速节点之间同样间隔 5 秒。
-7. 如果 `BANDWIDTH_PRIORITY=true` 时 `/speedtest` 不存在或全部测速失败，则自动回退到旧的 HTTP 延迟逻辑。
-8. 选出最优 IP 后，将其所在 `/24` 子网存入子网缓存（若 CF 对应 CIDR 覆盖完整 `/24`），供下次运行时优先验证。
-9. 按服务商分组更新 DNS A 记录：`*_DOMAINS` 使用第 1 名 IP，`*_DOMAINS2` 使用第 2 名 IP，`*_DOMAINS3` 使用第 3 名 IP。
-10. 单轮优选完成后，等待 `RUN_MINUTES` 进入下一轮；当 `ENABLE_SUPPLEMENTAL_HTTP_CHECK=true` 时，等待期间每 5 分钟对本轮最优 IP 做最多 3 次 HTTP 补充检查，任意一次成功即继续等待，连续 3 次失败则立即重新优选并从完成时间重新计时。
+## 快速开始
 
-## 使用方式
-
-### 直接运行
-
-编译后可通过命令行参数启动：
-
-```bash
-CloudflareFastCDN \
-  --CLOUDFLARE_KEY=你的CFToken \
-  --CLOUDFLARE_DOMAINS=cdn-cf.example.com \
-  --TENCENTCLOUD_SECRET_ID=你的腾讯云SecretId \
-  --TENCENTCLOUD_SECRET_KEY=你的腾讯云SecretKey \
-  --TENCENTCLOUD_DOMAINS=cdn-tencent.example.com \
-  --ALIBABACLOUD_ACCESS_KEY_ID=你的阿里云AccessKeyId \
-  --ALIBABACLOUD_ACCESS_KEY_SECRET=你的阿里云AccessKeySecret \
-  --ALIBABACLOUD_DOMAINS=cdn-aliyun.example.com \
-  --PING_THREADS=8 \
-  --MAX_IPS=400 \
-  --PING_INTERVAL_MS=150 \
-  --HTTP_PROBE_URL=https://www.visa.cn/ \
-  --HTTP_PROBE_TIMEOUT_MS=4000 \
-  --HTTP_SPEEDTEST_TIMEOUT_MS=10000 \
-  --HTTP_SPEEDTEST_IDLE_TIMEOUT_MS=3000 \
-  --RUN_MINUTES=60 \
-  --BANDWIDTH_PRIORITY=false \
-  --UPDATE_IP_LIST=false \
-  --ENABLE_SUPPLEMENTAL_HTTP_CHECK=false
-```
-
-### Docker 运行
-
-```bash
-docker run -d \
-  --name cloudflare-fast-cdn \
-  --restart unless-stopped \
-  -e CLOUDFLARE_KEY=你的CLOUDFLARE_KEY \
-  -e CLOUDFLARE_DOMAINS=cdn-cf.example.com \
-  -e TENCENTCLOUD_SECRET_ID=你的腾讯云SecretId \
-  -e TENCENTCLOUD_SECRET_KEY=你的腾讯云SecretKey \
-  -e TENCENTCLOUD_DOMAINS=cdn-tencent.example.com \
-  -e ALIBABACLOUD_ACCESS_KEY_ID=你的阿里云AccessKeyId \
-  -e ALIBABACLOUD_ACCESS_KEY_SECRET=你的阿里云AccessKeySecret \
-  -e ALIBABACLOUD_DOMAINS=cdn-aliyun.example.com \
-  -e PING_THREADS=8 \
-  -e MAX_IPS=400 \
-  -e PING_INTERVAL_MS=150 \
-  -e HTTP_PROBE_URL=https://www.visa.cn/ \
-  -e HTTP_PROBE_TIMEOUT_MS=4000 \
-  -e HTTP_SPEEDTEST_TIMEOUT_MS=10000 \
-  -e HTTP_SPEEDTEST_IDLE_TIMEOUT_MS=3000 \
-  -e RUN_MINUTES=60 \
-  -e BANDWIDTH_PRIORITY=false \
-  -e UPDATE_IP_LIST=false \
-  -e ENABLE_SUPPLEMENTAL_HTTP_CHECK=false \
-  -v cloudflare-fast-cdn-data:/data \
-  aiqinxuancai/cloudfarefastcdn:latest
-```
-
-### Docker Compose 运行
-
-创建 `docker-compose.yml`：
+### Docker Compose（推荐）
 
 ```yaml
-version: '3.8'
-
 services:
   cloudflare-fast-cdn:
     image: aiqinxuancai/cloudfarefastcdn:latest
     container_name: cloudflare-fast-cdn
     restart: unless-stopped
     environment:
-      CLOUDFLARE_KEY: "你的CLOUDFLARE_KEY"
+      CLOUDFLARE_KEY: "your_cf_api_token"
       CLOUDFLARE_DOMAINS: "cdn-cf.example.com"
-      TENCENTCLOUD_SECRET_ID: "你的腾讯云SecretId"
-      TENCENTCLOUD_SECRET_KEY: "你的腾讯云SecretKey"
+      TENCENTCLOUD_SECRET_ID: "your_secret_id"
+      TENCENTCLOUD_SECRET_KEY: "your_secret_key"
       TENCENTCLOUD_DOMAINS: "cdn-tencent.example.com"
-      ALIBABACLOUD_ACCESS_KEY_ID: "你的阿里云AccessKeyId"
-      ALIBABACLOUD_ACCESS_KEY_SECRET: "你的阿里云AccessKeySecret"
+      ALIBABACLOUD_ACCESS_KEY_ID: "your_access_key_id"
+      ALIBABACLOUD_ACCESS_KEY_SECRET: "your_access_key_secret"
       ALIBABACLOUD_DOMAINS: "cdn-aliyun.example.com"
-      PING_THREADS: "8"
-      MAX_IPS: "400"
-      PING_INTERVAL_MS: "150"
       HTTP_PROBE_URL: "https://www.visa.cn/"
-      HTTP_PROBE_TIMEOUT_MS: "4000"
-      HTTP_SPEEDTEST_TIMEOUT_MS: "10000"
-      HTTP_SPEEDTEST_IDLE_TIMEOUT_MS: "3000"
       RUN_MINUTES: "60"
-      BANDWIDTH_PRIORITY: "false"
-      UPDATE_IP_LIST: "false"
-      ENABLE_SUPPLEMENTAL_HTTP_CHECK: "false"
     volumes:
       - cloudflare-fast-cdn-data:/data
 
@@ -116,77 +39,72 @@ volumes:
   cloudflare-fast-cdn-data:
 ```
 
-启动：
-
 ```bash
 docker compose up -d
-```
-
-查看日志：
-
-```bash
 docker compose logs -f cloudflare-fast-cdn
 ```
 
-停止：
+### Docker
 
 ```bash
-docker compose down
+docker run -d \
+  --name cloudflare-fast-cdn \
+  --restart unless-stopped \
+  -e CLOUDFLARE_KEY=your_cf_api_token \
+  -e CLOUDFLARE_DOMAINS=cdn-cf.example.com \
+  -e HTTP_PROBE_URL=https://www.visa.cn/ \
+  -e RUN_MINUTES=60 \
+  -v cloudflare-fast-cdn-data:/data \
+  aiqinxuancai/cloudfarefastcdn:latest
 ```
 
-## 多服务商 DNS 配置
+### 直接运行
 
-至少配置一组 `*_DOMAINS`、`*_DOMAINS2` 或 `*_DOMAINS3`。只有配置了某个服务商的域名时，才需要填写该服务商的凭证。
+```bash
+CloudflareFastCDN \
+  --CLOUDFLARE_KEY=your_cf_api_token \
+  --CLOUDFLARE_DOMAINS=cdn-cf.example.com \
+  --HTTP_PROBE_URL=https://www.visa.cn/ \
+  --RUN_MINUTES=60
+```
 
-| 参数 | 必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `CLOUDFLARE_KEY` | 按需 | 无 | Cloudflare API Token，需要具备目标域名所在 Zone 的 DNS 编辑权限。 |
-| `CLOUDFLARE_DOMAINS` | 按需 | 无 | 使用第 1 名优选 IP 更新的 Cloudflare A 记录域名，多个用英文逗号分隔。 |
-| `CLOUDFLARE_DOMAINS2` | 否 | 无 | 使用第 2 名优选 IP 更新的 Cloudflare A 记录域名。 |
-| `CLOUDFLARE_DOMAINS3` | 否 | 无 | 使用第 3 名优选 IP 更新的 Cloudflare A 记录域名。 |
-| `TENCENTCLOUD_SECRET_ID` | 按需 | 无 | 腾讯云 API SecretId，用于 DNSPod HTTPS OpenAPI 签名。 |
-| `TENCENTCLOUD_SECRET_KEY` | 按需 | 无 | 腾讯云 API SecretKey。 |
-| `TENCENTCLOUD_DOMAINS` | 按需 | 无 | 使用第 1 名优选 IP 更新的腾讯云 DNSPod A 记录域名。 |
-| `TENCENTCLOUD_DOMAINS2` | 否 | 无 | 使用第 2 名优选 IP 更新的腾讯云 DNSPod A 记录域名。 |
-| `TENCENTCLOUD_DOMAINS3` | 否 | 无 | 使用第 3 名优选 IP 更新的腾讯云 DNSPod A 记录域名。 |
-| `ALIBABACLOUD_ACCESS_KEY_ID` | 按需 | 无 | 阿里云 AccessKeyId，用于阿里云解析 HTTPS OpenAPI 签名。 |
-| `ALIBABACLOUD_ACCESS_KEY_SECRET` | 按需 | 无 | 阿里云 AccessKeySecret。 |
-| `ALIBABACLOUD_DOMAINS` | 按需 | 无 | 使用第 1 名优选 IP 更新的阿里云解析 A 记录域名。 |
-| `ALIBABACLOUD_DOMAINS2` | 否 | 无 | 使用第 2 名优选 IP 更新的阿里云解析 A 记录域名。 |
-| `ALIBABACLOUD_DOMAINS3` | 否 | 无 | 使用第 3 名优选 IP 更新的阿里云解析 A 记录域名。 |
-| `DOMAINS` / `DOMAINS2` / `DOMAINS3` | 否 | 无 | 兼容旧变量，仅在对应 `CLOUDFLARE_DOMAINS*` 为空时作为 Cloudflare 域名使用。 |
+> 参数优先级：环境变量 > 命令行参数。多个域名用英文逗号分隔。
 
-## 通用参数
+## 配置参数
 
-| 参数 | 必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `PING_THREADS` | 否 | `8` | Ping 并发线程数。数值越大检测越快，但过高可能导致丢包率上升。 |
-| `MAX_IPS` | 否 | `400` | 每轮最多抽样检测的 IP 数量。程序会先按网段抽取，再从其中随机采样。 |
-| `PING_INTERVAL_MS` | 否 | `150` | 单次 Ping 的间隔时间，单位毫秒。 |
-| `HTTP_PROBE_URL` | 否 | `https://www.visa.cn/` | HTTP 验证阶段访问的测试地址。建议使用你自己的站点作为验证地址，并开启代理。 |
-| `HTTP_PROBE_TIMEOUT_MS` | 否 | `4000` | 单次 HTTP 连通性验证超时时间，单位毫秒，覆盖连接/TLS/响应头阶段。 |
-| `HTTP_SPEEDTEST_TIMEOUT_MS` | 否 | `10000` | 单个 IP 的 `/speedtest` 下载测速总超时时间，单位毫秒。 |
-| `HTTP_SPEEDTEST_IDLE_TIMEOUT_MS` | 否 | `3000` | `/speedtest` 下载过程中单次读取的空闲超时，单位毫秒；用于避免服务端只返回响应头后长期不继续下发数据。 |
-| `RUN_MINUTES` | 否 | `60` | 每轮任务执行完成后的等待分钟数，随后进入下一轮检测。 |
-| `BANDWIDTH_PRIORITY` | 否 | `false` | 是否启用带宽优选。`false` 表示只按 HTTP 延迟最小选择；`true` 表示先做 HTTP 验证，再尝试下载同域 `/speedtest` 做测速，按带宽最高选择。 |
-| `UPDATE_IP_LIST` | 否 | `false` | 启动时是否先更新 Cloudflare 官方 IPv4 网段列表，可选值 `true` / `false`。 |
-| `ENABLE_SUPPLEMENTAL_HTTP_CHECK` | 否 | `false` | 是否启用优选后的补充 HTTP 检查。启用后等待期间每 5 分钟检查本轮最优 IP，最多 3 次，全部失败则提前重新优选并重新计时。 |
+### DNS 服务商
 
-## 参数来源说明
+至少配置一组域名，只配置了域名的服务商才需要填写对应凭证。
 
-- Docker 环境下，程序从环境变量读取参数。
-- 非 Docker 环境下，优先读取环境变量，再读取命令行参数。
-- 命令行参数格式示例：`--TENCENTCLOUD_DOMAINS=cdn.example.com,cdn2.example.com`
-- DEBUG 本地运行仍兼容读取 `CLOUDFLARE_KEY.txt` 和 `DOMAINS.txt`，作为 Cloudflare 旧配置兜底。
+| 参数 | 说明 |
+| --- | --- |
+| `CLOUDFLARE_KEY` | Cloudflare API Token（需 DNS 编辑权限） |
+| `CLOUDFLARE_DOMAINS` / `DOMAINS2` / `DOMAINS3` | 第 1 / 2 / 3 名 IP 更新的域名 |
+| `TENCENTCLOUD_SECRET_ID` / `SECRET_KEY` | 腾讯云 API 凭证 |
+| `TENCENTCLOUD_DOMAINS` / `DOMAINS2` / `DOMAINS3` | 第 1 / 2 / 3 名 IP 更新的域名 |
+| `ALIBABACLOUD_ACCESS_KEY_ID` / `ACCESS_KEY_SECRET` | 阿里云 API 凭证 |
+| `ALIBABACLOUD_DOMAINS` / `DOMAINS2` / `DOMAINS3` | 第 1 / 2 / 3 名 IP 更新的域名 |
 
-## `/speedtest` 使用说明
+### 通用参数
 
-- 仅当 `BANDWIDTH_PRIORITY=true` 时，程序才会尝试访问 `/speedtest`。
-- `/speedtest` 的实际地址是 `HTTP_PROBE_URL` 所在域名下的 `/speedtest`，例如 `https://www.visa.cn/speedtest`。
-- 如果 `/speedtest` 不存在或测速失败，程序会自动回退到按 HTTP 延迟优选。
-- 默认情况下，单次 HTTP 探测超时为 `4s`，单个 IP 的测速总超时为 `10s`，下载空闲超时为 `3s`；如网络较差可按需调大。
-- 建议准备一个静态测速文件，文件大小至少 `4 MB`，高速链路下结果会更稳定。
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `PING_THREADS` | `8` | Ping 并发线程数 |
+| `MAX_IPS` | `400` | 每轮最多抽样 IP 数 |
+| `PING_INTERVAL_MS` | `150` | 单次 Ping 间隔（毫秒） |
+| `HTTP_PROBE_URL` | `https://www.visa.cn/` | HTTP 验证地址，建议使用自己的站点 |
+| `HTTP_PROBE_TIMEOUT_MS` | `4000` | HTTP 验证超时（毫秒） |
+| `HTTP_SPEEDTEST_TIMEOUT_MS` | `10000` | 测速总超时（毫秒） |
+| `HTTP_SPEEDTEST_IDLE_TIMEOUT_MS` | `3000` | 测速读取空闲超时（毫秒） |
+| `RUN_MINUTES` | `60` | 每轮完成后等待分钟数 |
+| `BANDWIDTH_PRIORITY` | `false` | `true` 时启用带宽优选（下载 `/speedtest` 测速），失败自动回退延迟优选 |
+| `UPDATE_IP_LIST` | `false` | 启动时更新 Cloudflare 官方 IPv4 网段列表 |
+| `ENABLE_SUPPLEMENTAL_HTTP_CHECK` | `false` | 等待期间每 5 分钟补充验证当前最优 IP，连续 3 次失败则提前重新优选 |
+
+### 带宽测速说明
+
+启用 `BANDWIDTH_PRIORITY=true` 后，程序会访问 `HTTP_PROBE_URL` 同域下的 `/speedtest` 文件进行测速。建议准备一个 **≥ 4 MB** 的静态文件，测速失败时自动回退延迟优选。
 
 ## 免责声明
 
-本项目本质上是一个批量检测 IP 连通性并自动更新 DNS 记录的工具，不提供网络攻击、入侵或绕过权限控制等能力。请仅在你拥有合法管理权限的 Cloudflare、腾讯云、阿里云账号和域名范围内使用。因使用本项目产生的任何后果，由使用者自行承担。
+请仅在你拥有合法管理权限的账号和域名下使用，由此产生的任何后果由使用者自行承担。
