@@ -2,6 +2,8 @@
 
 自动优选 Cloudflare CDN IP 并更新 DNS A 记录。支持 Cloudflare、腾讯云 DNSPod、阿里云解析。
 
+推荐阅读：[试试Cloudflare IP优选！让Cloudflare在国内再也不是减速器！](https://2x.nz/posts/cf-fastip/)
+
 ## 工作原理
 
 1. 从 Cloudflare IPv4 网段按 `/24` 子网抽样
@@ -94,7 +96,7 @@ CloudflareFastCDN \
 | `PING_THREADS` | `8` | Ping 并发线程数 |
 | `MAX_IPS` | `400` | 每轮最多抽样 IP 数 |
 | `PING_INTERVAL_MS` | `150` | 单次 Ping 间隔（毫秒） |
-| `HTTP_PROBE_URL` | `https://www.visa.cn/` | HTTP 验证地址，建议使用自己的站点 |
+| `HTTP_PROBE_URL` | `https://www.visa.cn/` | HTTP 验证地址，建议使用自己的站点，必须开CF代理（黄云） |
 | `HTTP_PROBE_TIMEOUT_MS` | `4000` | HTTP 验证超时（毫秒） |
 | `HTTP_SPEEDTEST_TIMEOUT_MS` | `10000` | 测速总超时（毫秒） |
 | `HTTP_SPEEDTEST_IDLE_TIMEOUT_MS` | `3000` | 测速读取空闲超时（毫秒） |
