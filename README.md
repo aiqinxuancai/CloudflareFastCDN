@@ -22,6 +22,7 @@ services:
     container_name: cloudflare-fast-cdn
     restart: unless-stopped
     environment:
+      TZ: "Asia/Shanghai"
       CLOUDFLARE_KEY: "your_cf_api_token"
       CLOUDFLARE_DOMAINS: "cdn-cf.example.com"
       TENCENTCLOUD_SECRET_ID: "your_secret_id"
@@ -50,6 +51,7 @@ docker compose logs -f cloudflare-fast-cdn
 docker run -d \
   --name cloudflare-fast-cdn \
   --restart unless-stopped \
+  -e TZ=Asia/Shanghai \
   -e CLOUDFLARE_KEY=your_cf_api_token \
   -e CLOUDFLARE_DOMAINS=cdn-cf.example.com \
   -e HTTP_PROBE_URL=https://www.visa.cn/ \
@@ -100,6 +102,9 @@ CloudflareFastCDN \
 | `BANDWIDTH_PRIORITY` | `false` | `true` 时启用带宽优选（下载 `/speedtest` 测速），失败自动回退延迟优选 |
 | `UPDATE_IP_LIST` | `false` | 启动时更新 Cloudflare 官方 IPv4 网段列表 |
 | `ENABLE_SUPPLEMENTAL_HTTP_CHECK` | `false` | 等待期间每 5 分钟补充验证当前最优 IP，连续 3 次失败则提前重新优选 |
+| `TZ` | `Etc/UTC` | Docker 环境下用于决定日志输出时区，例如 `Asia/Shanghai` |
+
+所有控制台日志都会携带标准时间戳，格式为 `yyyy-MM-dd HH:mm:ss.fff zzz`。
 
 ### 带宽测速说明
 

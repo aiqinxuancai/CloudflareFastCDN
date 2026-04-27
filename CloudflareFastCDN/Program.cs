@@ -26,6 +26,7 @@ namespace CloudflareFastCDN
         static async Task MainAsync(string[] args)
         {
             bool isDocker = File.Exists("/.dockerenv");
+            TimestampedConsole.Configure(isDocker);
             var config = LoadConfiguration(args, isDocker);
             ApplyConfiguration(config);
 
@@ -272,6 +273,12 @@ namespace CloudflareFastCDN
         {
             Console.WriteLine("启动配置：");
             Console.WriteLine($"  运行环境: {(isDocker ? "Docker" : "Local")}");
+            Console.WriteLine($"  日志时间格式: {TimestampedConsole.TimestampFormatPattern}");
+            Console.WriteLine($"  日志时区: {TimestampedConsole.EffectiveTimeZoneId}");
+            if (isDocker)
+            {
+                Console.WriteLine($"  TZ: {TimestampedConsole.RequestedTimeZoneId ?? "(not set)"}");
+            }
             Console.WriteLine($"  DNS提供商: {string.Join(", ", dnsUpdateProviders.Select(provider => provider.ProviderName))}");
             Console.WriteLine($"  CLOUDFLARE_KEY: {MaskSecret(AppConfig.CloudflareKey)}");
             Console.WriteLine($"  TENCENTCLOUD_SECRET_ID: {MaskSecret(AppConfig.TencentCloudSecretId)}");
@@ -341,7 +348,7 @@ namespace CloudflareFastCDN
                 return;
             }
 
-            var nextRunAt = DateTimeOffset.Now.Add(regularInterval);
+            var nextRunAt = TimestampedConsole.Now.Add(regularInterval);
             if (selectedIp == null)
             {
                 Console.WriteLine($"等待{AppConfig.RunMinutes}分钟；本轮没有可用IP，将在{SupplementalHttpCheckInterval.TotalMinutes:0}分钟后触发重新优选");
@@ -353,7 +360,7 @@ namespace CloudflareFastCDN
 
             while (true)
             {
-                var remaining = nextRunAt - DateTimeOffset.Now;
+                var remaining = nextRunAt - TimestampedConsole.Now;
                 if (remaining <= TimeSpan.Zero)
                 {
                     Console.WriteLine("到达定时优选时间，开始下一轮优选");
@@ -365,7 +372,7 @@ namespace CloudflareFastCDN
                     : SupplementalHttpCheckInterval;
                 await Task.Delay(delay);
 
-                if (DateTimeOffset.Now >= nextRunAt)
+                if (TimestampedConsole.Now >= nextRunAt)
                 {
                     Console.WriteLine("到达定时优选时间，开始下一轮优选");
                     return;

@@ -13,8 +13,13 @@ FROM mcr.microsoft.com/dotnet/runtime:9.0 AS runtime
 WORKDIR /app
 
 COPY --from=build /app/publish .
+COPY docker-entrypoint.sh .
 
-RUN mkdir -p /data
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tzdata \
+    && chmod +x /app/docker-entrypoint.sh \
+    && mkdir -p /data \
+    && rm -rf /var/lib/apt/lists/*
 
 ARG CLOUDFLARE_KEY=""
 ARG TENCENTCLOUD_SECRET_ID=""
@@ -41,6 +46,7 @@ ARG RUN_MINUTES="60"
 ARG BANDWIDTH_PRIORITY="false"
 ARG UPDATE_IP_LIST="false"
 ARG ENABLE_SUPPLEMENTAL_HTTP_CHECK="false"
+ARG TZ="Etc/UTC"
 
 ENV CLOUDFLARE_KEY=${CLOUDFLARE_KEY} \
     TENCENTCLOUD_SECRET_ID=${TENCENTCLOUD_SECRET_ID} \
@@ -66,8 +72,9 @@ ENV CLOUDFLARE_KEY=${CLOUDFLARE_KEY} \
     RUN_MINUTES=${RUN_MINUTES} \
     BANDWIDTH_PRIORITY=${BANDWIDTH_PRIORITY} \
     UPDATE_IP_LIST=${UPDATE_IP_LIST} \
-    ENABLE_SUPPLEMENTAL_HTTP_CHECK=${ENABLE_SUPPLEMENTAL_HTTP_CHECK}
+    ENABLE_SUPPLEMENTAL_HTTP_CHECK=${ENABLE_SUPPLEMENTAL_HTTP_CHECK} \
+    TZ=${TZ}
 
-ENTRYPOINT ["dotnet", "CloudflareFastCDN.dll"]
+ENTRYPOINT ["./docker-entrypoint.sh"]
 
 VOLUME ["/data"]
