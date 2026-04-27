@@ -12,7 +12,7 @@ namespace CloudflareFastCDN
         private const int HttpCandidateCount = 7;
         private const int HttpProbeCount = 3;
         private const int HttpMinSuccessCount = 2;
-        private static readonly TimeSpan FinalCandidateInterval = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan FinalCandidateInterval = TimeSpan.FromSeconds(10);
         private const int SubnetProbePingCount = 2;
         private const int SubnetSampleCount = 3;
         private static readonly TimeSpan SupplementalHttpCheckInterval = TimeSpan.FromMinutes(5);
