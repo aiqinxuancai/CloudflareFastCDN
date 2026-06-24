@@ -12,8 +12,10 @@ namespace CloudflareFastCDN
         private const int FinalHttpCandidateCount = 10;
         private const int HttpProbeCount = 3;
         private const int HttpMinSuccessCount = 2;
-        private static readonly TimeSpan FinalProbeInterval = TimeSpan.FromSeconds(5);
-        private static readonly TimeSpan FinalCandidateInterval = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan FinalProbeMinInterval = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan FinalProbeMaxInterval = TimeSpan.FromSeconds(8);
+        private static readonly TimeSpan FinalCandidateMinInterval = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan FinalCandidateMaxInterval = TimeSpan.FromSeconds(45);
         private const int SubnetProbePingCount = 2;
         private const int SubnetSampleCount = 3;
         private static readonly TimeSpan SupplementalHttpCheckInterval = TimeSpan.FromMinutes(5);
@@ -105,6 +107,7 @@ namespace CloudflareFastCDN
                 MaxIps = ResolveSetting("MAX_IPS", "400"),
                 PingIntervalMs = ResolveSetting("PING_INTERVAL_MS", "150"),
                 HttpProbeUrl = ResolveSetting("HTTP_PROBE_URL", "https://www.visa.cn/"),
+                HttpProbeHeaders = ResolveSetting("HTTP_PROBE_HEADERS"),
                 HttpProbeTimeoutMs = ResolveSetting("HTTP_PROBE_TIMEOUT_MS", "4000"),
                 HttpSpeedTestTimeoutMs = ResolveSetting("HTTP_SPEEDTEST_TIMEOUT_MS", "10000"),
                 HttpSpeedTestIdleTimeoutMs = ResolveSetting("HTTP_SPEEDTEST_IDLE_TIMEOUT_MS", "3000"),
@@ -137,6 +140,7 @@ namespace CloudflareFastCDN
             AppConfig.MaxIps = ParseNonZeroIntWithDefault(config.MaxIps, 400);
             AppConfig.PingIntervalMs = ParseNonZeroIntWithDefault(config.PingIntervalMs, 150);
             AppConfig.HttpProbeUrl = string.IsNullOrWhiteSpace(config.HttpProbeUrl) ? "https://www.visa.cn/" : config.HttpProbeUrl.Trim();
+            AppConfig.HttpProbeHeaders = ParseHeaderList(config.HttpProbeHeaders);
             AppConfig.HttpProbeTimeoutMs = ParsePositiveIntWithDefault(config.HttpProbeTimeoutMs, 4000);
             AppConfig.HttpSpeedTestTimeoutMs = ParsePositiveIntWithDefault(config.HttpSpeedTestTimeoutMs, 10000);
             AppConfig.HttpSpeedTestIdleTimeoutMs = ParsePositiveIntWithDefault(config.HttpSpeedTestIdleTimeoutMs, 3000);
@@ -241,6 +245,39 @@ namespace CloudflareFastCDN
                     .ToArray();
         }
 
+        private static IReadOnlyDictionary<string, string> ParseHeaderList(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            int itemIndex = 0;
+            foreach (var item in value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                itemIndex++;
+                var separatorIndex = item.IndexOf(':');
+                if (separatorIndex <= 0 || separatorIndex == item.Length - 1)
+                {
+                    Console.WriteLine($"忽略无效 HTTP_PROBE_HEADERS 项 #{itemIndex}");
+                    continue;
+                }
+
+                var name = item[..separatorIndex].Trim();
+                var headerValue = item[(separatorIndex + 1)..].Trim();
+                if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(headerValue))
+                {
+                    Console.WriteLine($"忽略无效 HTTP_PROBE_HEADERS 项 #{itemIndex}");
+                    continue;
+                }
+
+                headers[name] = headerValue;
+            }
+
+            return headers;
+        }
+
         private static string? TryReadTextFile(string path)
         {
             return File.Exists(path) ? File.ReadAllText(path).Trim() : null;
@@ -301,6 +338,7 @@ namespace CloudflareFastCDN
             Console.WriteLine($"  MAX_IPS: {AppConfig.MaxIps}");
             Console.WriteLine($"  PING_INTERVAL_MS: {AppConfig.PingIntervalMs}");
             Console.WriteLine($"  HTTP_PROBE_URL: {AppConfig.HttpProbeUrl}");
+            Console.WriteLine($"  HTTP_PROBE_HEADERS: {FormatHeaderNames(AppConfig.HttpProbeHeaders)}");
             Console.WriteLine($"  HTTP_PROBE_TIMEOUT_MS: {AppConfig.HttpProbeTimeoutMs}");
             Console.WriteLine($"  HTTP_SPEEDTEST_TIMEOUT_MS: {AppConfig.HttpSpeedTestTimeoutMs}");
             Console.WriteLine($"  HTTP_SPEEDTEST_IDLE_TIMEOUT_MS: {AppConfig.HttpSpeedTestIdleTimeoutMs}");
@@ -326,6 +364,13 @@ namespace CloudflareFastCDN
             }
 
             return $"{value[..Math.Min(4, value.Length)]}***";
+        }
+
+        private static string FormatHeaderNames(IReadOnlyDictionary<string, string> headers)
+        {
+            return headers.Count == 0
+                ? "(empty)"
+                : string.Join(",", headers.Keys);
         }
 
         private static bool HasAnyDomains(params string[][] domainGroups)
@@ -490,14 +535,14 @@ namespace CloudflareFastCDN
                 return null;
             }
 
-            Console.WriteLine($"开始最终检查：{httpCandidates.Count}个候选IP进行HTTP验证，每个IP检测{HttpProbeCount}次，单次间隔{FinalProbeInterval.TotalSeconds:0}秒，至少成功{HttpMinSuccessCount}次，当前模式：{(AppConfig.BandwidthPriority ? "带宽优先" : "延迟优先")}");
+            Console.WriteLine($"开始最终检查：{httpCandidates.Count}个候选IP进行HTTP验证，每个IP检测{HttpProbeCount}次，单次间隔{FinalProbeMinInterval.TotalSeconds:0}-{FinalProbeMaxInterval.TotalSeconds:0}秒，至少成功{HttpMinSuccessCount}次，当前模式：{(AppConfig.BandwidthPriority ? "带宽优先" : "延迟优先")}");
             int count = 0;
             List<PingData> topHttpList = new List<PingData>();
             var httpPing = new Httping();
             foreach (var ip in httpCandidates)
             {
                 count++;
-                var pingResult = await httpPing.Ping(ip.IP, HttpProbeCount, FinalProbeInterval);
+                var pingResult = await httpPing.Ping(ip.IP, HttpProbeCount, FinalProbeMinInterval, FinalProbeMaxInterval);
                 var averageDelay = pingResult.success > 0
                     ? TimeSpan.FromMilliseconds(pingResult.totalDelay.TotalMilliseconds / pingResult.success)
                     : TimeSpan.Zero;
@@ -512,8 +557,9 @@ namespace CloudflareFastCDN
 
                 if (count < httpCandidates.Count)
                 {
-                    Console.WriteLine($"等待{FinalCandidateInterval.TotalSeconds:0}秒后测试下一个HTTP候选节点");
-                    await Task.Delay(FinalCandidateInterval);
+                    var delay = GetRandomDelay(FinalCandidateMinInterval, FinalCandidateMaxInterval);
+                    Console.WriteLine($"等待{delay.TotalSeconds:0}秒后测试下一个HTTP候选节点");
+                    await Task.Delay(delay);
                 }
             }
 
@@ -557,8 +603,9 @@ namespace CloudflareFastCDN
 
                         if (speedIndex < topHttpList.Count - 1)
                         {
-                            Console.WriteLine($"等待{FinalCandidateInterval.TotalSeconds:0}秒后测速下一个候选节点");
-                            await Task.Delay(FinalCandidateInterval);
+                            var delay = GetRandomDelay(FinalCandidateMinInterval, FinalCandidateMaxInterval);
+                            Console.WriteLine($"等待{delay.TotalSeconds:0}秒后测速下一个候选节点");
+                            await Task.Delay(delay);
                         }
                     }
 
@@ -652,6 +699,17 @@ namespace CloudflareFastCDN
             return selectedIp;
         }
 
+        private static TimeSpan GetRandomDelay(TimeSpan minDelay, TimeSpan maxDelay)
+        {
+            if (maxDelay <= minDelay)
+            {
+                return minDelay;
+            }
+
+            var milliseconds = Random.Shared.NextInt64((long)minDelay.TotalMilliseconds, (long)maxDelay.TotalMilliseconds + 1);
+            return TimeSpan.FromMilliseconds(milliseconds);
+        }
+
         private sealed class ConfigurationData
         {
             public string? CloudflareKey { get; init; }
@@ -672,6 +730,7 @@ namespace CloudflareFastCDN
             public string? MaxIps { get; init; }
             public string? PingIntervalMs { get; init; }
             public string? HttpProbeUrl { get; init; }
+            public string? HttpProbeHeaders { get; init; }
             public string? HttpProbeTimeoutMs { get; init; }
             public string? HttpSpeedTestTimeoutMs { get; init; }
             public string? HttpSpeedTestIdleTimeoutMs { get; init; }

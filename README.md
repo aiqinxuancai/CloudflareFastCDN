@@ -34,6 +34,7 @@ services:
       ALIBABACLOUD_ACCESS_KEY_SECRET: "your_access_key_secret"
       ALIBABACLOUD_DOMAINS: "cdn-aliyun.example.com"
       HTTP_PROBE_URL: "https://www.visa.cn/"
+      HTTP_PROBE_HEADERS: "X-CDN-Probe-Token:your_random_token"
       RUN_MINUTES: "60"
     volumes:
       - cloudflare-fast-cdn-data:/data
@@ -97,6 +98,7 @@ CloudflareFastCDN \
 | `MAX_IPS` | `400` | 每轮最多抽样 IP 数 |
 | `PING_INTERVAL_MS` | `150` | 单次 Ping 间隔（毫秒） |
 | `HTTP_PROBE_URL` | `https://www.visa.cn/` | HTTP 验证地址，建议使用自己的站点，必须开CF代理（黄云） |
+| `HTTP_PROBE_HEADERS` | 空 | HTTP 验证和测速请求附加请求头，格式为 `Header-Name:Value;Another-Header:Value` |
 | `HTTP_PROBE_TIMEOUT_MS` | `4000` | HTTP 验证超时（毫秒） |
 | `HTTP_SPEEDTEST_TIMEOUT_MS` | `10000` | 测速总超时（毫秒） |
 | `HTTP_SPEEDTEST_IDLE_TIMEOUT_MS` | `3000` | 测速读取空闲超时（毫秒） |
@@ -107,6 +109,13 @@ CloudflareFastCDN \
 | `TZ` | `Etc/UTC` | Docker 环境下用于决定日志输出时区，例如 `Asia/Shanghai` |
 
 所有控制台日志都会携带标准时间戳，格式为 `yyyy-MM-dd HH:mm:ss.fff zzz`。
+
+`HTTP_PROBE_HEADERS` 可配合 Cloudflare 自定义规则放行探测请求，例如：
+
+```txt
+(http.request.uri.path eq "/cf-health.txt"
+ and any(http.request.headers["x-cdn-probe-token"][*] eq "your_random_token"))
+```
 
 ### 带宽测速说明
 
