@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http;
 using System.Net.Sockets;
 
@@ -11,7 +12,7 @@ namespace CloudflareFastCDN.Utils
         private const int DefaultSpeedTestBytes = 4 * 1024 * 1024;
         private static readonly string UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
 
-        public async Task<(int success, TimeSpan totalDelay, string error)> Ping(IPAddress ip, int pingCount = 3)
+        public async Task<(int success, TimeSpan totalDelay, string error)> Ping(IPAddress ip, int pingCount = 3, TimeSpan? interval = null)
         {
             var probeTimeout = TimeSpan.FromMilliseconds(AppConfig.HttpProbeTimeoutMs);
             using var client = CreateClient(ip, probeTimeout);
@@ -23,14 +24,20 @@ namespace CloudflareFastCDN.Utils
             for (int i = 0; i < pingCount; i++)
             {
                 var pingResult = await SendProbeAsync(client, probeTimeout);
-                if (!pingResult.success)
+                if (pingResult.success)
+                {
+                    success++;
+                    totalDelay += pingResult.delay;
+                }
+                else
                 {
                     lastError = pingResult.error;
-                    continue;
                 }
 
-                success++;
-                totalDelay += pingResult.delay;
+                if (i < pingCount - 1 && interval > TimeSpan.Zero)
+                {
+                    await Task.Delay(interval.Value);
+                }
             }
 
             return (success, totalDelay, lastError);
@@ -79,6 +86,22 @@ namespace CloudflareFastCDN.Utils
                 Timeout = Timeout.InfiniteTimeSpan,
             };
             client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
+            client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
+            client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("zh-CN,zh;q=0.9,en;q=0.8");
+            client.DefaultRequestHeaders.AcceptEncoding.ParseAdd("gzip");
+            client.DefaultRequestHeaders.AcceptEncoding.ParseAdd("deflate");
+            client.DefaultRequestHeaders.AcceptEncoding.ParseAdd("br");
+            client.DefaultRequestHeaders.CacheControl = new CacheControlHeaderValue { NoCache = true };
+            client.DefaultRequestHeaders.Pragma.ParseAdd("no-cache");
+            client.DefaultRequestHeaders.ConnectionClose = false;
+            client.DefaultRequestHeaders.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
+            client.DefaultRequestHeaders.TryAddWithoutValidation("Sec-Fetch-Dest", "document");
+            client.DefaultRequestHeaders.TryAddWithoutValidation("Sec-Fetch-Mode", "navigate");
+            client.DefaultRequestHeaders.TryAddWithoutValidation("Sec-Fetch-Site", "none");
+            client.DefaultRequestHeaders.TryAddWithoutValidation("Sec-Fetch-User", "?1");
+            client.DefaultRequestHeaders.TryAddWithoutValidation("sec-ch-ua", "\"Google Chrome\";v=\"141\", \"Chromium\";v=\"141\", \"Not_A Brand\";v=\"24\"");
+            client.DefaultRequestHeaders.TryAddWithoutValidation("sec-ch-ua-mobile", "?0");
+            client.DefaultRequestHeaders.TryAddWithoutValidation("sec-ch-ua-platform", "\"macOS\"");
             return client;
         }
 

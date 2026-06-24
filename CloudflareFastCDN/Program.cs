@@ -7,12 +7,13 @@ namespace CloudflareFastCDN
     internal class Program
     {
         private const int FirstRoundPingCount = 4;
-        private const int SecondRoundPingCount = 10;
-        private const int SecondRoundMaxPacketLoss = 1;
-        private const int HttpCandidateCount = 7;
+        private const int SecondRoundPingCount = 5;
+        private const int SecondRoundMaxPacketLoss = 0;
+        private const int FinalHttpCandidateCount = 10;
         private const int HttpProbeCount = 3;
         private const int HttpMinSuccessCount = 2;
-        private static readonly TimeSpan FinalCandidateInterval = TimeSpan.FromSeconds(10);
+        private static readonly TimeSpan FinalProbeInterval = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan FinalCandidateInterval = TimeSpan.FromSeconds(30);
         private const int SubnetProbePingCount = 2;
         private const int SubnetSampleCount = 3;
         private static readonly TimeSpan SupplementalHttpCheckInterval = TimeSpan.FromMinutes(5);
@@ -455,7 +456,7 @@ namespace CloudflareFastCDN
                 .Where(item => item.Sended == SecondRoundPingCount && item.Sended - item.Received <= SecondRoundMaxPacketLoss)
                 .ToList();
 
-            var httpCandidates = top100PingsSelect.Take(HttpCandidateCount).ToList();
+            var httpCandidates = top100PingsSelect.Take(FinalHttpCandidateCount).ToList();
 
             var sampledSubnets = subnetCache.RandomSampleIPs(SubnetSampleCount);
             if (sampledSubnets.Any())
@@ -477,20 +478,26 @@ namespace CloudflareFastCDN
                 }
             }
 
+            if (httpCandidates.Count > FinalHttpCandidateCount)
+            {
+                Console.WriteLine($"最终检查候选超过{FinalHttpCandidateCount}个，仅保留前{FinalHttpCandidateCount}个IP");
+                httpCandidates = httpCandidates.Take(FinalHttpCandidateCount).ToList();
+            }
+
             if (!httpCandidates.Any())
             {
                 Console.WriteLine("没有IP进入HTTP验证阶段");
                 return null;
             }
 
-            Console.WriteLine($"开始最终检查：{httpCandidates.Count}个候选IP进行HTTP验证，每个IP检测{HttpProbeCount}次，至少成功{HttpMinSuccessCount}次，当前模式：{(AppConfig.BandwidthPriority ? "带宽优先" : "延迟优先")}");
+            Console.WriteLine($"开始最终检查：{httpCandidates.Count}个候选IP进行HTTP验证，每个IP检测{HttpProbeCount}次，单次间隔{FinalProbeInterval.TotalSeconds:0}秒，至少成功{HttpMinSuccessCount}次，当前模式：{(AppConfig.BandwidthPriority ? "带宽优先" : "延迟优先")}");
             int count = 0;
             List<PingData> topHttpList = new List<PingData>();
             var httpPing = new Httping();
             foreach (var ip in httpCandidates)
             {
                 count++;
-                var pingResult = await httpPing.Ping(ip.IP, HttpProbeCount);
+                var pingResult = await httpPing.Ping(ip.IP, HttpProbeCount, FinalProbeInterval);
                 var averageDelay = pingResult.success > 0
                     ? TimeSpan.FromMilliseconds(pingResult.totalDelay.TotalMilliseconds / pingResult.success)
                     : TimeSpan.Zero;
