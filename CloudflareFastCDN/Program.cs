@@ -10,6 +10,8 @@ namespace CloudflareFastCDN
         private const int SecondRoundPingCount = 5;
         private const int SecondRoundMaxPacketLoss = 0;
         private const int FinalHttpCandidateCount = 10;
+        private const int FinalSecondRoundCandidateCount = 7;
+        private const int FinalCachedCandidateCount = 3;
         private const int HttpProbeCount = 3;
         private const int HttpMinSuccessCount = 2;
         private static readonly TimeSpan FinalProbeMinInterval = TimeSpan.FromSeconds(5);
@@ -501,7 +503,10 @@ namespace CloudflareFastCDN
                 .Where(item => item.Sended == SecondRoundPingCount && item.Sended - item.Received <= SecondRoundMaxPacketLoss)
                 .ToList();
 
-            var httpCandidates = top100PingsSelect.Take(FinalHttpCandidateCount).ToList();
+            var httpCandidates = top100PingsSelect.Take(FinalSecondRoundCandidateCount).ToList();
+            var remainingSecondRoundCandidates = top100PingsSelect
+                .Skip(FinalSecondRoundCandidateCount)
+                .ToList();
 
             var sampledSubnets = subnetCache.RandomSampleIPs(SubnetSampleCount);
             if (sampledSubnets.Any())
@@ -516,11 +521,20 @@ namespace CloudflareFastCDN
                 if (evicted || subnetPassed.Count < sampledSubnets.Count)
                     subnetCache.Save();
 
-                foreach (var passedIp in subnetPassed)
+                foreach (var passedIp in subnetPassed.Take(FinalCachedCandidateCount))
                 {
                     if (!httpCandidates.Any(candidate => candidate.IP.Equals(passedIp.IP)))
                         httpCandidates.Add(passedIp);
                 }
+            }
+
+            foreach (var secondRoundIp in remainingSecondRoundCandidates)
+            {
+                if (httpCandidates.Count >= FinalHttpCandidateCount)
+                    break;
+
+                if (!httpCandidates.Any(candidate => candidate.IP.Equals(secondRoundIp.IP)))
+                    httpCandidates.Add(secondRoundIp);
             }
 
             if (httpCandidates.Count > FinalHttpCandidateCount)
