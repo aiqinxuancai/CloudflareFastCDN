@@ -14,6 +14,7 @@ namespace CloudflareFastCDN
         private const int FinalCachedCandidateCount = 3;
         private const int HttpProbeCount = 3;
         private const int HttpMinSuccessCount = 2;
+        private const double AssignedDelayMaxMultiplier = 3d;
         private static readonly TimeSpan FinalProbeMinInterval = TimeSpan.FromSeconds(5);
         private static readonly TimeSpan FinalProbeMaxInterval = TimeSpan.FromSeconds(8);
         private static readonly TimeSpan FinalCandidateMinInterval = TimeSpan.FromSeconds(30);
@@ -53,10 +54,14 @@ namespace CloudflareFastCDN
                 await IPProcessor.UpdateIPList();
             }
 
+            var selection = await SingleSelect(dnsUpdateProviders);
             while (true)
             {
-                var selectedIp = await SingleSelect(dnsUpdateProviders);
-                await WaitForNextSelection(selectedIp);
+                var shouldRunFullSelection = await WaitForNextSelection(selection);
+                if (shouldRunFullSelection)
+                {
+                    selection = await SingleSelect(dnsUpdateProviders);
+                }
             }
         }
 
@@ -380,30 +385,32 @@ namespace CloudflareFastCDN
             return domainGroups.Any(domainGroup => domainGroup.Length > 0);
         }
 
-        private static async Task WaitForNextSelection(IPAddress? selectedIp)
+        private static async Task<bool> WaitForNextSelection(SelectionResult selection)
         {
             var regularInterval = TimeSpan.FromMinutes(AppConfig.RunMinutes);
             if (regularInterval <= TimeSpan.Zero)
             {
                 Console.WriteLine("RUN_MINUTES 小于等于0，立即开始下一轮优选");
-                return;
+                return true;
             }
 
             if (!AppConfig.EnableSupplementalHttpCheck)
             {
-                Console.WriteLine($"等待{AppConfig.RunMinutes}分钟");
+                Console.WriteLine(selection.AssignedIps.Count == 0
+                    ? $"等待{AppConfig.RunMinutes}分钟；本轮没有已分配IP，到期后重新优选"
+                    : $"等待{AppConfig.RunMinutes}分钟；到期后先复检{selection.AssignedIps.Count}个已分配IP");
                 await Task.Delay(regularInterval);
-                return;
+                return !await ValidateAssignedIps(selection.AssignedIps);
             }
 
             var nextRunAt = TimestampedConsole.Now.Add(regularInterval);
-            if (selectedIp == null)
+            if (selection.AssignedIps.Count == 0)
             {
                 Console.WriteLine($"等待{AppConfig.RunMinutes}分钟；本轮没有可用IP，将在{SupplementalHttpCheckInterval.TotalMinutes:0}分钟后触发重新优选");
             }
             else
             {
-                Console.WriteLine($"等待{AppConfig.RunMinutes}分钟；期间每{SupplementalHttpCheckInterval.TotalMinutes:0}分钟对 {selectedIp} 进行补充HTTP检查");
+                Console.WriteLine($"等待{AppConfig.RunMinutes}分钟；期间每{SupplementalHttpCheckInterval.TotalMinutes:0}分钟对 {selection.AssignedIps[0].IP} 进行补充HTTP检查，到期后复检{selection.AssignedIps.Count}个已分配IP");
             }
 
             while (true)
@@ -411,8 +418,7 @@ namespace CloudflareFastCDN
                 var remaining = nextRunAt - TimestampedConsole.Now;
                 if (remaining <= TimeSpan.Zero)
                 {
-                    Console.WriteLine("到达定时优选时间，开始下一轮优选");
-                    return;
+                    return !await ValidateAssignedIps(selection.AssignedIps);
                 }
 
                 var delay = remaining < SupplementalHttpCheckInterval
@@ -422,23 +428,68 @@ namespace CloudflareFastCDN
 
                 if (TimestampedConsole.Now >= nextRunAt)
                 {
-                    Console.WriteLine("到达定时优选时间，开始下一轮优选");
-                    return;
+                    return !await ValidateAssignedIps(selection.AssignedIps);
                 }
 
-                if (selectedIp == null)
+                if (selection.AssignedIps.Count == 0)
                 {
                     Console.WriteLine("本轮没有可用于补充HTTP检查的IP，触发重新优选并重新计时");
-                    return;
+                    return true;
                 }
 
-                var healthy = await RunSupplementalHttpCheck(selectedIp);
+                var healthy = await RunSupplementalHttpCheck(selection.AssignedIps[0].IP);
                 if (!healthy)
                 {
                     Console.WriteLine($"补充HTTP检查连续{SupplementalHttpCheckCount}次失败，立即开始重新优选并重新计时");
-                    return;
+                    return true;
                 }
             }
+        }
+
+        private static async Task<bool> ValidateAssignedIps(IReadOnlyList<AssignedIp> assignedIps)
+        {
+            if (assignedIps.Count == 0)
+            {
+                Console.WriteLine("到达定时优选时间，但没有已分配IP，开始全量优选");
+                return false;
+            }
+
+            Console.WriteLine($"到达定时优选时间，先复检{assignedIps.Count}个已分配IP；每个IP检测{HttpProbeCount}次，单次间隔{FinalProbeMinInterval.TotalSeconds:0}-{FinalProbeMaxInterval.TotalSeconds:0}秒，延迟超过基线{AssignedDelayMaxMultiplier:0.#}倍则重新优选");
+            var httpPing = new Httping();
+
+            for (int i = 0; i < assignedIps.Count; i++)
+            {
+                var assignedIp = assignedIps[i];
+                var result = await httpPing.Ping(assignedIp.IP, HttpProbeCount, FinalProbeMinInterval, FinalProbeMaxInterval);
+                var averageDelay = result.success > 0
+                    ? TimeSpan.FromMilliseconds(result.totalDelay.TotalMilliseconds / result.success)
+                    : TimeSpan.Zero;
+
+                if (result.success < HttpProbeCount)
+                {
+                    Console.WriteLine($"已分配IP复检失败：Top{assignedIp.Rank} {assignedIp.IP} HTTP成功：{result.success}/{HttpProbeCount}，原因：{FormatError(result.error)}，开始全量优选");
+                    return false;
+                }
+
+                var maxAllowedDelay = TimeSpan.FromMilliseconds(assignedIp.BaselineDelay.TotalMilliseconds * AssignedDelayMaxMultiplier);
+                if (assignedIp.BaselineDelay > TimeSpan.Zero && averageDelay > maxAllowedDelay)
+                {
+                    Console.WriteLine($"已分配IP复检延迟异常：Top{assignedIp.Rank} {assignedIp.IP} 当前{averageDelay.TotalMilliseconds:0.00}ms，基线{assignedIp.BaselineDelay.TotalMilliseconds:0.00}ms，开始全量优选");
+                    return false;
+                }
+
+                Console.WriteLine($"已分配IP复检正常：Top{assignedIp.Rank} {assignedIp.IP} HTTP成功：{result.success}/{HttpProbeCount} 当前{averageDelay.TotalMilliseconds:0.00}ms，基线{assignedIp.BaselineDelay.TotalMilliseconds:0.00}ms");
+
+                if (i < assignedIps.Count - 1)
+                {
+                    var delay = GetRandomDelay(FinalCandidateMinInterval, FinalCandidateMaxInterval);
+                    Console.WriteLine($"等待{delay.TotalSeconds:0}秒后复检下一个已分配IP");
+                    await Task.Delay(delay);
+                }
+            }
+
+            Console.WriteLine("已分配IP复检均正常，本周期跳过全量优选");
+            return true;
         }
 
         private static async Task<bool> RunSupplementalHttpCheck(IPAddress selectedIp)
@@ -480,7 +531,7 @@ namespace CloudflareFastCDN
             return shuffledData.Take(sampleSize).ToList();
         }
 
-        private static async Task<IPAddress?> SingleSelect(IReadOnlyList<DnsUpdateProvider> dnsUpdateProviders)
+        private static async Task<SelectionResult> SingleSelect(IReadOnlyList<DnsUpdateProvider> dnsUpdateProviders)
         {
             var processor = new IPProcessor();
 
@@ -546,7 +597,7 @@ namespace CloudflareFastCDN
             if (!httpCandidates.Any())
             {
                 Console.WriteLine("没有IP进入HTTP验证阶段");
-                return null;
+                return SelectionResult.Empty;
             }
 
             Console.WriteLine($"开始最终检查：{httpCandidates.Count}个候选IP进行HTTP验证，每个IP检测{HttpProbeCount}次，单次间隔{FinalProbeMinInterval.TotalSeconds:0}-{FinalProbeMaxInterval.TotalSeconds:0}秒，至少成功{HttpMinSuccessCount}次，当前模式：{(AppConfig.BandwidthPriority ? "带宽优先" : "延迟优先")}");
@@ -651,7 +702,7 @@ namespace CloudflareFastCDN
                 topNData = new List<PingData>();
             }
 
-            var selectedIp = topNData.FirstOrDefault()?.IP;
+            var assignedIpsByRank = new Dictionary<int, PingData>();
 
             if (topNData.Count > 0)
             {
@@ -690,6 +741,7 @@ namespace CloudflareFastCDN
                                 if (updated)
                                 {
                                     Console.WriteLine($"已完成更新[{dnsUpdateProvider.ProviderName}]域名 {domain}");
+                                    assignedIpsByRank.TryAdd(rank, rankedIp);
                                 }
                                 else
                                 {
@@ -710,7 +762,21 @@ namespace CloudflareFastCDN
             }
 
             Console.WriteLine("单次执行完毕");
-            return selectedIp;
+            var assignedIps = assignedIpsByRank
+                .OrderBy(item => item.Key)
+                .Select(item => new AssignedIp(item.Value.IP, item.Value.Delay, item.Key + 1))
+                .ToList();
+
+            if (assignedIps.Count > 0)
+            {
+                Console.WriteLine($"本轮实际分配IP：{string.Join(", ", assignedIps.Select(item => $"Top{item.Rank} {item.IP}({item.BaselineDelay.TotalMilliseconds:0.00}ms)"))}");
+            }
+            else
+            {
+                Console.WriteLine("本轮没有记录到成功分配的IP");
+            }
+
+            return new SelectionResult(assignedIps);
         }
 
         private static TimeSpan GetRandomDelay(TimeSpan minDelay, TimeSpan maxDelay)
@@ -723,6 +789,13 @@ namespace CloudflareFastCDN
             var milliseconds = Random.Shared.NextInt64((long)minDelay.TotalMilliseconds, (long)maxDelay.TotalMilliseconds + 1);
             return TimeSpan.FromMilliseconds(milliseconds);
         }
+
+        private sealed record SelectionResult(IReadOnlyList<AssignedIp> AssignedIps)
+        {
+            public static SelectionResult Empty { get; } = new(Array.Empty<AssignedIp>());
+        }
+
+        private sealed record AssignedIp(IPAddress IP, TimeSpan BaselineDelay, int Rank);
 
         private sealed class ConfigurationData
         {
