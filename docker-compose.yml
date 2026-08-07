@@ -1,0 +1,19 @@
+services:
+  cloudflare-fast-cdn:
+    image: "${IMAGE_NAME:-ghcr.io/aiqinxuancai/cloudflarefastcdn}:${IMAGE_TAG:-latest}"
+    container_name: cloudflare-fast-cdn
+    restart: unless-stopped
+    env_file:
+      - .env
+    cap_add:
+      - NET_RAW
+    volumes:
+      - cloudflare-fast-cdn-data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  cloudflare-fast-cdn-data:

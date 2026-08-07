@@ -17,36 +17,14 @@
 
 ### Docker Compose（推荐）
 
-```yaml
-services:
-  cloudflare-fast-cdn:
-    image: aiqinxuancai/cloudfarefastcdn:latest
-    container_name: cloudflare-fast-cdn
-    restart: unless-stopped
-    environment:
-      TZ: "Asia/Shanghai"
-      CLOUDFLARE_KEY: "your_cf_api_token"
-      CLOUDFLARE_DOMAINS: "cdn-cf.example.com"
-      TENCENTCLOUD_SECRET_ID: "your_secret_id"
-      TENCENTCLOUD_SECRET_KEY: "your_secret_key"
-      TENCENTCLOUD_DOMAINS: "cdn-tencent.example.com"
-      ALIBABACLOUD_ACCESS_KEY_ID: "your_access_key_id"
-      ALIBABACLOUD_ACCESS_KEY_SECRET: "your_access_key_secret"
-      ALIBABACLOUD_DOMAINS: "cdn-aliyun.example.com"
-      HTTP_PROBE_URL: "https://www.visa.cn/"
-      HTTP_PROBE_HEADERS: "X-CDN-Probe-Token:your_random_token"
-      RUN_MINUTES: "60"
-    volumes:
-      - cloudflare-fast-cdn-data:/data
-
-volumes:
-  cloudflare-fast-cdn-data:
-```
-
 ```bash
+cp .env.example .env
+# 编辑 .env，至少填写一组 DNS 服务商凭证及对应域名
 docker compose up -d
 docker compose logs -f cloudflare-fast-cdn
 ```
+
+默认拉取 `ghcr.io/aiqinxuancai/cloudflarefastcdn:latest`。可在 `.env` 中修改 `IMAGE_TAG` 固定版本；如果 GHCR 软件包为私有，请先执行 `docker login ghcr.io`。
 
 ### Docker
 
@@ -60,7 +38,7 @@ docker run -d \
   -e HTTP_PROBE_URL=https://www.visa.cn/ \
   -e RUN_MINUTES=60 \
   -v cloudflare-fast-cdn-data:/data \
-  aiqinxuancai/cloudfarefastcdn:latest
+  ghcr.io/aiqinxuancai/cloudflarefastcdn:latest
 ```
 
 ### 直接运行
