@@ -10,7 +10,7 @@ namespace CloudflareFastCDN.Utils
         private const string DefaultProbeUrl = "https://www.visa.cn/";
         private const int DefaultSpeedTestBytes = 4 * 1024 * 1024;
         private static readonly TimeSpan BackoffPause = TimeSpan.FromMinutes(5);
-        private static readonly string UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+        private static readonly string UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
 
         public async Task<(int success, TimeSpan totalDelay, string error)> Ping(IPAddress ip, int pingCount = 3, TimeSpan? minInterval = null, TimeSpan? maxInterval = null)
         {
@@ -115,13 +115,16 @@ namespace CloudflareFastCDN.Utils
             var client = new HttpClient(handler)
             {
                 Timeout = Timeout.InfiniteTimeSpan,
+                DefaultRequestVersion = HttpVersion.Version20,
+                DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
             };
             client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
-            client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
+            client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7");
             client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("zh-CN,zh;q=0.9,en;q=0.8");
             client.DefaultRequestHeaders.AcceptEncoding.ParseAdd("gzip");
             client.DefaultRequestHeaders.AcceptEncoding.ParseAdd("deflate");
             client.DefaultRequestHeaders.AcceptEncoding.ParseAdd("br");
+            client.DefaultRequestHeaders.AcceptEncoding.ParseAdd("zstd");
             client.DefaultRequestHeaders.ConnectionClose = false;
             client.DefaultRequestHeaders.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
             client.DefaultRequestHeaders.TryAddWithoutValidation("Sec-Fetch-Dest", "document");
@@ -130,7 +133,8 @@ namespace CloudflareFastCDN.Utils
             client.DefaultRequestHeaders.TryAddWithoutValidation("Sec-Fetch-User", "?1");
             client.DefaultRequestHeaders.TryAddWithoutValidation("sec-ch-ua", "\"Google Chrome\";v=\"141\", \"Chromium\";v=\"141\", \"Not_A Brand\";v=\"24\"");
             client.DefaultRequestHeaders.TryAddWithoutValidation("sec-ch-ua-mobile", "?0");
-            client.DefaultRequestHeaders.TryAddWithoutValidation("sec-ch-ua-platform", "\"macOS\"");
+            client.DefaultRequestHeaders.TryAddWithoutValidation("sec-ch-ua-platform", "\"Windows\"");
+            client.DefaultRequestHeaders.TryAddWithoutValidation("Priority", "u=0, i");
 
             foreach (var header in AppConfig.HttpProbeHeaders)
             {
@@ -143,19 +147,9 @@ namespace CloudflareFastCDN.Utils
 
         private static async Task<(bool success, TimeSpan delay, string error, bool shouldBackoff, bool skipNode)> SendProbeAsync(HttpClient client, TimeSpan timeout)
         {
-            var headResult = await SendAsync(client, HttpMethod.Head, timeout);
-            if (headResult.statusCode == HttpStatusCode.Forbidden)
-            {
-                return (false, TimeSpan.Zero, headResult.error, headResult.shouldBackoff, true);
-            }
-
-            if (headResult.success || !ShouldFallbackToGet(headResult.statusCode))
-            {
-                return (headResult.success, headResult.delay, headResult.error, headResult.shouldBackoff, false);
-            }
-
             var getResult = await SendAsync(client, HttpMethod.Get, timeout);
-            return (getResult.success, getResult.delay, getResult.error, getResult.shouldBackoff, false);
+            var skipNode = getResult.statusCode == HttpStatusCode.Forbidden;
+            return (getResult.success, getResult.delay, getResult.error, getResult.shouldBackoff, skipNode);
         }
 
         private static async Task<(bool success, TimeSpan delay, HttpStatusCode statusCode, string error, bool shouldBackoff)> SendAsync(HttpClient client, HttpMethod method, TimeSpan timeout)
@@ -262,11 +256,6 @@ namespace CloudflareFastCDN.Utils
                 Debug.WriteLine(ex);
                 return (false, false, 0, 0, TimeSpan.Zero, $"{ex.GetType().Name}: {ex.Message}", false);
             }
-        }
-
-        private static bool ShouldFallbackToGet(HttpStatusCode statusCode)
-        {
-            return statusCode == HttpStatusCode.MethodNotAllowed || statusCode == HttpStatusCode.NotImplemented;
         }
 
         private static bool IsValidStatusCode(HttpStatusCode statusCode)

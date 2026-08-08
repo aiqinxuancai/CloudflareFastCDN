@@ -88,6 +88,8 @@ CloudflareFastCDN \
 
 所有控制台日志都会携带标准时间戳，格式为 `yyyy-MM-dd HH:mm:ss.fff zzz`。
 
+HTTP 验证使用浏览器导航风格的 `GET` 请求，优先协商 HTTP/2 并在需要时回退到 HTTP/1.1。验证只读取响应头，不下载完整页面；收到 `HTTP 403 Forbidden (GET)` 时会立即跳过当前节点，不再重试。
+
 每轮等待结束后，程序会先按最终 HTTP 验证的节奏复检已成功分配到 DNS 的 IP。任一 IP 出现 HTTP 失败、错误码、超时，或平均延迟超过分配时基线的 3 倍，就会触发全量优选；全部正常则继续等待下一周期。
 
 `HTTP_PROBE_HEADERS` 可配合 Cloudflare 自定义规则放行探测请求，例如：
