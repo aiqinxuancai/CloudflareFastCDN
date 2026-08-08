@@ -14,6 +14,12 @@ namespace CloudflareFastCDN.Utils
 
         public async Task<(int success, TimeSpan totalDelay, string error)> Ping(IPAddress ip, int pingCount = 3, TimeSpan? minInterval = null, TimeSpan? maxInterval = null)
         {
+            var result = await PingWithOutcome(ip, pingCount, minInterval, maxInterval);
+            return (result.success, result.totalDelay, result.error);
+        }
+
+        internal async Task<(int success, TimeSpan totalDelay, string error, bool skipNode)> PingWithOutcome(IPAddress ip, int pingCount = 3, TimeSpan? minInterval = null, TimeSpan? maxInterval = null)
+        {
             var probeTimeout = TimeSpan.FromMilliseconds(AppConfig.HttpProbeTimeoutMs);
             using var client = CreateClient(ip, probeTimeout);
 
@@ -34,6 +40,11 @@ namespace CloudflareFastCDN.Utils
                     lastError = pingResult.error;
                 }
 
+                if (pingResult.skipNode)
+                {
+                    return (success, totalDelay, lastError, true);
+                }
+
                 if (pingResult.shouldBackoff)
                 {
                     await PauseAfterBackoffAsync(pingResult.error);
@@ -48,7 +59,7 @@ namespace CloudflareFastCDN.Utils
                 }
             }
 
-            return (success, totalDelay, lastError);
+            return (success, totalDelay, lastError, false);
         }
 
         public async Task<(bool success, TimeSpan delay, string error)> SinglePing(IPAddress ip)
@@ -130,16 +141,21 @@ namespace CloudflareFastCDN.Utils
             return client;
         }
 
-        private static async Task<(bool success, TimeSpan delay, string error, bool shouldBackoff)> SendProbeAsync(HttpClient client, TimeSpan timeout)
+        private static async Task<(bool success, TimeSpan delay, string error, bool shouldBackoff, bool skipNode)> SendProbeAsync(HttpClient client, TimeSpan timeout)
         {
             var headResult = await SendAsync(client, HttpMethod.Head, timeout);
+            if (headResult.statusCode == HttpStatusCode.Forbidden)
+            {
+                return (false, TimeSpan.Zero, headResult.error, headResult.shouldBackoff, true);
+            }
+
             if (headResult.success || !ShouldFallbackToGet(headResult.statusCode))
             {
-                return (headResult.success, headResult.delay, headResult.error, headResult.shouldBackoff);
+                return (headResult.success, headResult.delay, headResult.error, headResult.shouldBackoff, false);
             }
 
             var getResult = await SendAsync(client, HttpMethod.Get, timeout);
-            return (getResult.success, getResult.delay, getResult.error, getResult.shouldBackoff);
+            return (getResult.success, getResult.delay, getResult.error, getResult.shouldBackoff, false);
         }
 
         private static async Task<(bool success, TimeSpan delay, HttpStatusCode statusCode, string error, bool shouldBackoff)> SendAsync(HttpClient client, HttpMethod method, TimeSpan timeout)

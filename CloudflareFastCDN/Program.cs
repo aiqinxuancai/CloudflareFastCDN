@@ -607,14 +607,15 @@ namespace CloudflareFastCDN
             foreach (var ip in httpCandidates)
             {
                 count++;
-                var pingResult = await httpPing.Ping(ip.IP, HttpProbeCount, FinalProbeMinInterval, FinalProbeMaxInterval);
+                var pingResult = await httpPing.PingWithOutcome(ip.IP, HttpProbeCount, FinalProbeMinInterval, FinalProbeMaxInterval);
                 var averageDelay = pingResult.success > 0
                     ? TimeSpan.FromMilliseconds(pingResult.totalDelay.TotalMilliseconds / pingResult.success)
                     : TimeSpan.Zero;
 
                 var errorMessage = pingResult.success >= HttpProbeCount ? string.Empty : $" 失败原因：{FormatError(pingResult.error)}";
-                Console.WriteLine($"最终结果 [{count}] {ip.IP} HTTP成功：{pingResult.success}/{HttpProbeCount} HTTP均延时：{averageDelay.TotalMilliseconds}ms{errorMessage}");
-                if (pingResult.success >= HttpMinSuccessCount)
+                var skipMessage = pingResult.skipNode ? "，已跳过此节点" : string.Empty;
+                Console.WriteLine($"最终结果 [{count}] {ip.IP} HTTP成功：{pingResult.success}/{HttpProbeCount} HTTP均延时：{averageDelay.TotalMilliseconds}ms{errorMessage}{skipMessage}");
+                if (!pingResult.skipNode && pingResult.success >= HttpMinSuccessCount)
                 {
                     ip.Delay = averageDelay;
                     topHttpList.Add(ip);
