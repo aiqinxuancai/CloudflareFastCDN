@@ -9,12 +9,14 @@ namespace CloudflareFastCDN
         private const int FirstRoundPingCount = 4;
         private const int SecondRoundPingCount = 5;
         private const int SecondRoundMaxPacketLoss = 0;
+        private const double SecondRoundCandidateRatio = 0.25d;
         private const int FinalHttpCandidateCount = 10;
         private const int FinalSecondRoundCandidateCount = 7;
         private const int FinalCachedCandidateCount = 3;
         private const int HttpProbeCount = 3;
         private const int HttpMinSuccessCount = 2;
-        private const double AssignedDelayMaxMultiplier = 3d;
+        private const double AssignedDelayMaxMultiplier = 2d;
+        private static readonly TimeSpan AssignedDelayMinimumThreshold = TimeSpan.FromMilliseconds(300);
         private static readonly TimeSpan FinalProbeMinInterval = TimeSpan.FromSeconds(5);
         private static readonly TimeSpan FinalProbeMaxInterval = TimeSpan.FromSeconds(8);
         private static readonly TimeSpan FinalCandidateMinInterval = TimeSpan.FromSeconds(30);
@@ -454,7 +456,7 @@ namespace CloudflareFastCDN
                 return false;
             }
 
-            Console.WriteLine($"到达定时优选时间，先复检{assignedIps.Count}个已分配IP；每个IP检测{HttpProbeCount}次，单次间隔{FinalProbeMinInterval.TotalSeconds:0}-{FinalProbeMaxInterval.TotalSeconds:0}秒，延迟超过基线{AssignedDelayMaxMultiplier:0.#}倍则重新优选");
+            Console.WriteLine($"到达定时优选时间，先复检{assignedIps.Count}个已分配IP；每个IP检测{HttpProbeCount}次，单次间隔{FinalProbeMinInterval.TotalSeconds:0}-{FinalProbeMaxInterval.TotalSeconds:0}秒，延迟达到动态阈值 max({AssignedDelayMinimumThreshold.TotalMilliseconds:0}ms, 基线×{AssignedDelayMaxMultiplier:0.#}) 则重新优选");
             var httpPing = new Httping();
 
             for (int i = 0; i < assignedIps.Count; i++)
@@ -471,8 +473,7 @@ namespace CloudflareFastCDN
                     return false;
                 }
 
-                var maxAllowedDelay = TimeSpan.FromMilliseconds(assignedIp.BaselineDelay.TotalMilliseconds * AssignedDelayMaxMultiplier);
-                if (assignedIp.BaselineDelay > TimeSpan.Zero && averageDelay > maxAllowedDelay)
+                if (IsAssignedDelayInvalid(assignedIp.BaselineDelay, averageDelay))
                 {
                     Console.WriteLine($"已分配IP复检延迟异常：Top{assignedIp.Rank} {assignedIp.IP} 当前{averageDelay.TotalMilliseconds:0.00}ms，基线{assignedIp.BaselineDelay.TotalMilliseconds:0.00}ms，开始全量优选");
                     return false;
@@ -512,6 +513,25 @@ namespace CloudflareFastCDN
             return false;
         }
 
+        private static int CalculateSecondRoundCandidateCount(int sampledIpCount)
+        {
+            return sampledIpCount <= 0
+                ? 0
+                : (int)Math.Ceiling(sampledIpCount * SecondRoundCandidateRatio);
+        }
+
+        private static bool IsAssignedDelayInvalid(TimeSpan baselineDelay, TimeSpan currentDelay)
+        {
+            if (baselineDelay <= TimeSpan.Zero)
+            {
+                return false;
+            }
+
+            var multipliedThreshold = baselineDelay.TotalMilliseconds * AssignedDelayMaxMultiplier;
+            var thresholdMilliseconds = Math.Max(AssignedDelayMinimumThreshold.TotalMilliseconds, multipliedThreshold);
+            return currentDelay.TotalMilliseconds >= thresholdMilliseconds;
+        }
+
         public static List<T> SampleData<T>(IList<T> sourceData, int sampleSize)
         {
             if (sampleSize >= sourceData.Count)
@@ -545,17 +565,18 @@ namespace CloudflareFastCDN
             Console.WriteLine($"开始第1轮检查：全量{FirstRoundPingCount}次Ping");
             var firstRoundResults = await task.RunAsync();
             var topPings = firstRoundResults.Where(item => item.Sended == FirstRoundPingCount && item.Received == item.Sended).ToList();
-            var top100Pings = topPings.Take(100);
+            var secondRoundCandidateLimit = CalculateSecondRoundCandidateCount(ipAddresses.Count);
+            var secondRoundPings = topPings.Take(secondRoundCandidateLimit).ToList();
 
-            Console.WriteLine($"开始第2轮检查：Top100,{SecondRoundPingCount}次Ping，允许最多丢包{SecondRoundMaxPacketLoss}/{SecondRoundPingCount}");
-            IcmpPing top100PingTask = new IcmpPing(top100Pings.Select(item => item.IP).ToList(), SecondRoundPingCount);
-            var secondRoundResults = await top100PingTask.RunAsync();
-            var top100PingsSelect = secondRoundResults
+            Console.WriteLine($"开始第2轮检查：第1轮前{secondRoundPings.Count}名（抽样{ipAddresses.Count}个，前{SecondRoundCandidateRatio:P0}上限{secondRoundCandidateLimit}个），{SecondRoundPingCount}次Ping，允许最多丢包{SecondRoundMaxPacketLoss}/{SecondRoundPingCount}");
+            IcmpPing secondRoundPingTask = new IcmpPing(secondRoundPings.Select(item => item.IP).ToList(), SecondRoundPingCount);
+            var secondRoundResults = await secondRoundPingTask.RunAsync();
+            var secondRoundPassed = secondRoundResults
                 .Where(item => item.Sended == SecondRoundPingCount && item.Sended - item.Received <= SecondRoundMaxPacketLoss)
                 .ToList();
 
-            var httpCandidates = top100PingsSelect.Take(FinalSecondRoundCandidateCount).ToList();
-            var remainingSecondRoundCandidates = top100PingsSelect
+            var httpCandidates = secondRoundPassed.Take(FinalSecondRoundCandidateCount).ToList();
+            var remainingSecondRoundCandidates = secondRoundPassed
                 .Skip(FinalSecondRoundCandidateCount)
                 .ToList();
 

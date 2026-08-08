@@ -148,11 +148,10 @@ namespace CloudflareFastCDN.Utils
         private static async Task<(bool success, TimeSpan delay, string error, bool shouldBackoff, bool skipNode)> SendProbeAsync(HttpClient client, TimeSpan timeout)
         {
             var getResult = await SendAsync(client, HttpMethod.Get, timeout);
-            var skipNode = getResult.statusCode == HttpStatusCode.Forbidden;
-            return (getResult.success, getResult.delay, getResult.error, getResult.shouldBackoff, skipNode);
+            return (getResult.success, getResult.delay, getResult.error, getResult.shouldBackoff, getResult.skipNode);
         }
 
-        private static async Task<(bool success, TimeSpan delay, HttpStatusCode statusCode, string error, bool shouldBackoff)> SendAsync(HttpClient client, HttpMethod method, TimeSpan timeout)
+        private static async Task<(bool success, TimeSpan delay, HttpStatusCode statusCode, string error, bool shouldBackoff, bool skipNode)> SendAsync(HttpClient client, HttpMethod method, TimeSpan timeout)
         {
             using var request = new HttpRequestMessage(method, GetProbeUri());
             var stopwatch = Stopwatch.StartNew();
@@ -165,22 +164,23 @@ namespace CloudflareFastCDN.Utils
 
                 if (IsValidStatusCode(response.StatusCode))
                 {
-                    return (true, stopwatch.Elapsed, response.StatusCode, string.Empty, false);
+                    return (true, stopwatch.Elapsed, response.StatusCode, string.Empty, false, false);
                 }
 
                 var error = $"HTTP {(int)response.StatusCode} {response.StatusCode} ({method.Method})";
                 Debug.WriteLine($"HTTP probe failed, {error}");
-                return (false, TimeSpan.Zero, response.StatusCode, error, ShouldBackoff(response.StatusCode));
+                var skipNode = response.StatusCode == HttpStatusCode.Forbidden;
+                return (false, TimeSpan.Zero, response.StatusCode, error, !skipNode && ShouldBackoff(response.StatusCode), skipNode);
             }
             catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested)
             {
                 Debug.WriteLine($"HTTP probe timed out after {timeout.TotalMilliseconds:0}ms: {ex.Message}");
-                return (false, TimeSpan.Zero, 0, $"Timeout after {timeout.TotalMilliseconds:0}ms ({method.Method})", true);
+                return (false, TimeSpan.Zero, 0, $"Timeout after {timeout.TotalMilliseconds:0}ms ({method.Method})", false, true);
             }
             catch (Exception ex)
             {
                 Debug.WriteLine(ex);
-                return (false, TimeSpan.Zero, 0, $"{ex.GetType().Name}: {ex.Message}", false);
+                return (false, TimeSpan.Zero, 0, $"{ex.GetType().Name}: {ex.Message}", false, false);
             }
         }
 
