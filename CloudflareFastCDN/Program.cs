@@ -479,7 +479,15 @@ namespace CloudflareFastCDN
                     return false;
                 }
 
-                Console.WriteLine($"已分配IP复检正常：Top{assignedIp.Rank} {assignedIp.IP} HTTP成功：{result.success}/{HttpProbeCount} 当前{averageDelay.TotalMilliseconds:0.00}ms，基线{assignedIp.BaselineDelay.TotalMilliseconds:0.00}ms");
+                if (averageDelay > TimeSpan.Zero && averageDelay < assignedIp.BaselineDelay)
+                {
+                    Console.WriteLine($"已分配IP复检正常：Top{assignedIp.Rank} {assignedIp.IP} HTTP成功：{result.success}/{HttpProbeCount} 当前{averageDelay.TotalMilliseconds:0.00}ms，低于基线{assignedIp.BaselineDelay.TotalMilliseconds:0.00}ms，基线更新为当前值");
+                    assignedIp.BaselineDelay = averageDelay;
+                }
+                else
+                {
+                    Console.WriteLine($"已分配IP复检正常：Top{assignedIp.Rank} {assignedIp.IP} HTTP成功：{result.success}/{HttpProbeCount} 当前{averageDelay.TotalMilliseconds:0.00}ms，基线{assignedIp.BaselineDelay.TotalMilliseconds:0.00}ms");
+                }
 
                 if (i < assignedIps.Count - 1)
                 {
@@ -817,7 +825,19 @@ namespace CloudflareFastCDN
             public static SelectionResult Empty { get; } = new(Array.Empty<AssignedIp>());
         }
 
-        private sealed record AssignedIp(IPAddress IP, TimeSpan BaselineDelay, int Rank);
+        private sealed class AssignedIp
+        {
+            public AssignedIp(IPAddress ip, TimeSpan baselineDelay, int rank)
+            {
+                IP = ip;
+                BaselineDelay = baselineDelay;
+                Rank = rank;
+            }
+
+            public IPAddress IP { get; }
+            public TimeSpan BaselineDelay { get; set; }
+            public int Rank { get; }
+        }
 
         private sealed class ConfigurationData
         {
