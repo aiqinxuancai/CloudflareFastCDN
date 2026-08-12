@@ -62,12 +62,12 @@ namespace CloudflareFastCDN.Utils
             return (success, totalDelay, lastError, false);
         }
 
-        public async Task<(bool success, TimeSpan delay, string error)> SinglePing(IPAddress ip)
+        public async Task<(bool success, TimeSpan delay, string error)> SinglePing(IPAddress ip, bool pauseAfterBackoff = true)
         {
             var probeTimeout = TimeSpan.FromMilliseconds(AppConfig.HttpProbeTimeoutMs);
             using var client = CreateClient(ip, probeTimeout);
             var pingResult = await SendProbeAsync(client, probeTimeout);
-            if (pingResult.shouldBackoff)
+            if (pauseAfterBackoff && pingResult.shouldBackoff)
             {
                 await PauseAfterBackoffAsync(pingResult.error);
             }

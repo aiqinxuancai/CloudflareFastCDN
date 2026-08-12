@@ -30,5 +30,6 @@ namespace CloudflareFastCDN.Utils
         public static bool BandwidthPriority { get; set; } = false;
         public static bool UpdateIPList { get; set; } = false;
         public static bool EnableSupplementalHttpCheck { get; set; } = false;
+        public static bool ForceInitialFullSelection { get; set; } = false;
     }
 }

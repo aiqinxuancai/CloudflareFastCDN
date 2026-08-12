@@ -1,6 +1,7 @@
 using CloudflareFastCDN.Services;
 using CloudflareFastCDN.Utils;
 using System.Net;
+using System.Net.Sockets;
 
 namespace CloudflareFastCDN
 {
@@ -56,7 +57,18 @@ namespace CloudflareFastCDN
                 await IPProcessor.UpdateIPList();
             }
 
-            var selection = await SingleSelect(dnsUpdateProviders);
+            SelectionResult selection;
+            if (AppConfig.ForceInitialFullSelection)
+            {
+                Console.WriteLine("FORCE_INITIAL_FULL_SELECTION 已启用，首次启动直接进行全量优选");
+                selection = await SingleSelect(dnsUpdateProviders);
+            }
+            else
+            {
+                selection = await TryCreateInitialSelectionFromDomains(dnsUpdateProviders)
+                    ?? await SingleSelect(dnsUpdateProviders);
+            }
+
             while (true)
             {
                 var shouldRunFullSelection = await WaitForNextSelection(selection);
@@ -123,7 +135,8 @@ namespace CloudflareFastCDN
                 RunMinutes = ResolveSetting("RUN_MINUTES", "60"),
                 BandwidthPriority = ResolveSetting("BANDWIDTH_PRIORITY", "false"),
                 UpdateIPList = ResolveSetting("UPDATE_IP_LIST", "false"),
-                EnableSupplementalHttpCheck = ResolveSetting("ENABLE_SUPPLEMENTAL_HTTP_CHECK", "false")
+                EnableSupplementalHttpCheck = ResolveSetting("ENABLE_SUPPLEMENTAL_HTTP_CHECK", "false"),
+                ForceInitialFullSelection = ResolveSetting("FORCE_INITIAL_FULL_SELECTION", "false")
             };
         }
 
@@ -157,6 +170,7 @@ namespace CloudflareFastCDN
             AppConfig.BandwidthPriority = ParseBoolWithDefault(config.BandwidthPriority, false);
             AppConfig.UpdateIPList = ParseBoolWithDefault(config.UpdateIPList, false);
             AppConfig.EnableSupplementalHttpCheck = ParseBoolWithDefault(config.EnableSupplementalHttpCheck, false);
+            AppConfig.ForceInitialFullSelection = ParseBoolWithDefault(config.ForceInitialFullSelection, false);
         }
 
         private static List<DnsUpdateProvider> BuildDnsUpdateProviders()
@@ -355,6 +369,7 @@ namespace CloudflareFastCDN
             Console.WriteLine($"  BANDWIDTH_PRIORITY: {AppConfig.BandwidthPriority}");
             Console.WriteLine($"  UPDATE_IP_LIST: {AppConfig.UpdateIPList}");
             Console.WriteLine($"  ENABLE_SUPPLEMENTAL_HTTP_CHECK: {AppConfig.EnableSupplementalHttpCheck}");
+            Console.WriteLine($"  FORCE_INITIAL_FULL_SELECTION: {AppConfig.ForceInitialFullSelection}");
         }
 
         private static void PrintDomainGroup(string variableName, IReadOnlyCollection<string> domains)
@@ -385,6 +400,90 @@ namespace CloudflareFastCDN
         private static bool HasAnyDomains(params string[][] domainGroups)
         {
             return domainGroups.Any(domainGroup => domainGroup.Length > 0);
+        }
+
+        private static async Task<SelectionResult?> TryCreateInitialSelectionFromDomains(IReadOnlyList<DnsUpdateProvider> dnsUpdateProviders)
+        {
+            Console.WriteLine("首次启动先解析并测试已配置域名的当前IPv4地址");
+
+            var resolvedIps = new Dictionary<IPAddress, ResolvedDomainIp>();
+            foreach (var dnsUpdateProvider in dnsUpdateProviders)
+            {
+                for (int rank = 0; rank < 3; rank++)
+                {
+                    foreach (var domain in dnsUpdateProvider.GetDomains(rank))
+                    {
+                        IPAddress[] addresses;
+                        try
+                        {
+                            addresses = await Dns.GetHostAddressesAsync(domain);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"首次域名预检解析失败：{domain}，原因：{FormatError(ex.Message)}，开始全量优选");
+                            return null;
+                        }
+
+                        var ipv4Addresses = addresses
+                            .Where(address => address.AddressFamily == AddressFamily.InterNetwork)
+                            .Distinct()
+                            .ToList();
+                        if (ipv4Addresses.Count == 0)
+                        {
+                            Console.WriteLine($"首次域名预检未解析到IPv4地址：{domain}，开始全量优选");
+                            return null;
+                        }
+
+                        Console.WriteLine($"首次域名预检解析：{domain} -> {string.Join(", ", ipv4Addresses)}");
+                        foreach (var ip in ipv4Addresses)
+                        {
+                            if (!resolvedIps.TryGetValue(ip, out var resolvedIp))
+                            {
+                                resolvedIp = new ResolvedDomainIp(ip, rank + 1);
+                                resolvedIps.Add(ip, resolvedIp);
+                            }
+                            else
+                            {
+                                resolvedIp.Rank = Math.Min(resolvedIp.Rank, rank + 1);
+                            }
+
+                            resolvedIp.Domains.Add(domain);
+                        }
+                    }
+                }
+            }
+
+            if (resolvedIps.Count == 0)
+            {
+                Console.WriteLine("首次域名预检没有可测试的IPv4地址，开始全量优选");
+                return null;
+            }
+
+            var assignedIps = new List<AssignedIp>();
+            var httpPing = new Httping();
+            var hasFailure = false;
+            foreach (var resolvedIp in resolvedIps.Values)
+            {
+                var result = await httpPing.SinglePing(resolvedIp.IP, pauseAfterBackoff: false);
+                if (!result.success)
+                {
+                    hasFailure = true;
+                    Console.WriteLine($"首次域名预检失败：{resolvedIp.IP}（{string.Join(", ", resolvedIp.Domains)}），原因：{FormatError(result.error)}");
+                    continue;
+                }
+
+                assignedIps.Add(new AssignedIp(resolvedIp.IP, result.delay, resolvedIp.Rank));
+                Console.WriteLine($"首次域名预检正常：Top{resolvedIp.Rank} {resolvedIp.IP}（{string.Join(", ", resolvedIp.Domains)}），HTTP延迟：{result.delay.TotalMilliseconds:0.00}ms");
+            }
+
+            if (hasFailure)
+            {
+                Console.WriteLine("首次域名预检存在无法连接的IPv4地址，开始全量优选");
+                return null;
+            }
+
+            Console.WriteLine($"首次域名预检的{assignedIps.Count}个IPv4地址均正常，跳过首次全量优选");
+            return new SelectionResult(assignedIps);
         }
 
         private static async Task<bool> WaitForNextSelection(SelectionResult selection)
@@ -867,6 +966,7 @@ namespace CloudflareFastCDN
             public string? BandwidthPriority { get; init; }
             public string? UpdateIPList { get; init; }
             public string? EnableSupplementalHttpCheck { get; init; }
+            public string? ForceInitialFullSelection { get; init; }
         }
 
         private static string FormatError(string? error)
@@ -901,6 +1001,19 @@ namespace CloudflareFastCDN
             {
                 return $"{VariablePrefix}_DOMAINS{(rank == 0 ? string.Empty : (rank + 1).ToString())}";
             }
+        }
+
+        private sealed class ResolvedDomainIp
+        {
+            public ResolvedDomainIp(IPAddress ip, int rank)
+            {
+                IP = ip;
+                Rank = rank;
+            }
+
+            public IPAddress IP { get; }
+            public int Rank { get; set; }
+            public HashSet<string> Domains { get; } = new(StringComparer.OrdinalIgnoreCase);
         }
     }
 }

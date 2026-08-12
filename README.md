@@ -6,12 +6,13 @@
 
 ## 工作原理
 
-1. 从 Cloudflare IPv4 网段按 `/24` 子网抽样
-2. 多轮 ICMP Ping 筛选低延迟候选 IP
-3. HTTP 连通性验证，可选带宽测速（`BANDWIDTH_PRIORITY=true`）
-4. 子网缓存（`subnet_cache.json`）加速历史优质节点复用
-5. 按排名依次更新 `*_DOMAINS` / `*_DOMAINS2` / `*_DOMAINS3` 的 A 记录
-6. 等待 `RUN_MINUTES` 后先复检已分配 IP；全部正常则跳过全量优选，否则进入下一轮全量优选；启用补充检查时，等待期间每 5 分钟验证一次当前最优 IP
+1. 首次启动解析已配置域名的当前 IPv4 地址并各做一次 HTTP 检查，全部正常时跳过首次全量优选
+2. 需要全量优选时，从 Cloudflare IPv4 网段按 `/24` 子网抽样
+3. 多轮 ICMP Ping 筛选低延迟候选 IP
+4. HTTP 连通性验证，可选带宽测速（`BANDWIDTH_PRIORITY=true`）
+5. 子网缓存（`subnet_cache.json`）加速历史优质节点复用
+6. 按排名依次更新 `*_DOMAINS` / `*_DOMAINS2` / `*_DOMAINS3` 的 A 记录
+7. 等待 `RUN_MINUTES` 后先复检已分配 IP；全部正常则跳过全量优选，否则进入下一轮全量优选；启用补充检查时，等待期间每 5 分钟验证一次当前最优 IP
 
 ## 快速开始
 
@@ -84,6 +85,7 @@ CloudflareFastCDN \
 | `BANDWIDTH_PRIORITY` | `false` | `true` 时启用带宽优选（下载 `/speedtest` 测速），失败自动回退延迟优选 |
 | `UPDATE_IP_LIST` | `false` | 启动时更新 Cloudflare 官方 IPv4 网段列表 |
 | `ENABLE_SUPPLEMENTAL_HTTP_CHECK` | `false` | 等待期间每 5 分钟补充验证当前最优 IP，连续 3 次失败则提前重新优选 |
+| `FORCE_INITIAL_FULL_SELECTION` | `false` | `true` 时跳过首次域名 IP 预检并强制执行全量优选 |
 | `TZ` | `Etc/UTC` | Docker 环境下用于决定日志输出时区，例如 `Asia/Shanghai` |
 
 所有控制台日志都会携带标准时间戳，格式为 `yyyy-MM-dd HH:mm:ss.fff zzz`。
@@ -93,6 +95,8 @@ HTTP 验证使用浏览器导航风格的 `GET` 请求，优先协商 HTTP/2 并
 第二轮 ICMP 检查会选取本轮实际抽样 IP 数量的前 25%（向上取整），例如抽样 400 个时取 100 个，抽样 150 个时取 38 个。
 
 每轮等待结束后，程序会先按最终 HTTP 验证的节奏复检已成功分配到 DNS 的 IP。延迟失效阈值为 `max(300ms, 当前基线 × 2)`，因此 100ms 基线到 300ms、400ms 基线到 800ms 时都会触发全量优选；复检通过且当前延迟低于基线时，基线会下调为当前值并用于下一周期。HTTP 失败、错误码或超时也会触发全量优选。全部正常则继续等待下一周期。
+
+默认情况下，程序首次启动会解析所有已配置域名的 A 记录，对去重后的每个 IPv4 地址做一次 HTTP 检查，并以检查延迟作为后续周期复检的初始基线。只要域名解析失败、没有 IPv4 地址或任一地址检查失败，就立即进入全量优选；全部地址正常时不会改写 DNS，直接进入等待周期。设置 `FORCE_INITIAL_FULL_SELECTION=true` 可恢复首次启动必定全量优选的行为。
 
 `HTTP_PROBE_HEADERS` 可配合 Cloudflare 自定义规则放行探测请求，例如：
 
