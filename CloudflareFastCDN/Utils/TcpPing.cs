@@ -13,7 +13,6 @@ namespace CloudflareFastCDN.Utils
         private const int TcpConnectTimeout = 1000;
         private const int MaxRoutine = 1000;
 
-        private static int Threads = AppConfig.PingThreads;
         private static int TcpPort = 443;
         private static int PingCount = 4;
 
@@ -26,7 +25,7 @@ namespace CloudflareFastCDN.Utils
             PingCount = pingCount;
             ips = ipList;
             csv = new List<PingData>();
-            semaphore = new SemaphoreSlim(Threads);
+            semaphore = new SemaphoreSlim(Math.Max(1, AppConfig.PingThreads));
         }
 
 

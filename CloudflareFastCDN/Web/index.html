@@ -162,10 +162,55 @@ td.num, th.num { text-align: right; }
 .log-line .lt { color: var(--text-muted); margin-right: 8px; }
 .log-line.bad { border-left-color: var(--critical); }
 .log-line.good { border-left-color: var(--good); }
-.config-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 4px 24px; font-size: 13px; }
-.config-list div { display: flex; gap: 8px; min-width: 0; }
-.config-list .k { color: var(--text-secondary); flex: none; }
-.config-list .v { font-family: var(--mono); overflow-wrap: anywhere; }
+.tabs { display: flex; gap: 4px; }
+.tabs a {
+  color: var(--text-secondary); text-decoration: none; padding: 4px 12px; border-radius: 6px;
+}
+.tabs a:hover { background: var(--wash); }
+.tabs a[aria-current="page"] { color: var(--text-primary); background: var(--wash); font-weight: 600; }
+.view { display: grid; gap: 16px; }
+.view[hidden] { display: none; }
+.banner {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+  background: var(--surface-1); border: 1px solid var(--border); border-left: 3px solid var(--warning);
+  border-radius: 10px; padding: 12px 16px;
+}
+.banner[hidden] { display: none; }
+.banner .icon { color: var(--warning); font-weight: 700; }
+.banner a { color: var(--accent); }
+.settings-intro { color: var(--text-secondary); margin: 0 0 8px; }
+.startup-list { display: flex; flex-wrap: wrap; gap: 4px 24px; font-size: 13px; color: var(--text-secondary); }
+.startup-list b { font-family: var(--mono); font-weight: 500; color: var(--text-primary); }
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px 24px; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field .field-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.field label.name { font-weight: 500; }
+.field .key { font-family: var(--mono); font-size: 11px; color: var(--text-muted); }
+.field .tag {
+  font-size: 11px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 999px; padding: 0 8px;
+}
+.field input[type="text"], .field input[type="url"], .field input[type="number"], .field input[type="password"], .field textarea {
+  font: inherit; width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--page); color: var(--text-primary);
+}
+.field textarea { font-family: var(--mono); font-size: 13px; resize: vertical; min-height: 58px; }
+.field input:disabled, .field textarea:disabled { opacity: 0.65; cursor: not-allowed; }
+.field .control-row { display: flex; gap: 8px; align-items: flex-start; }
+.field .control-row > :first-child { flex: 1; min-width: 0; }
+.field .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; padding: 4px 0; }
+.field .switch input { width: 16px; height: 16px; accent-color: var(--accent); }
+.field .desc { font-size: 12px; color: var(--text-muted); }
+.field .lock { font-size: 12px; color: var(--text-secondary); }
+.field .error { font-size: 12px; color: var(--critical); }
+.field .error:empty { display: none; }
+.field.invalid input, .field.invalid textarea { border-color: var(--critical); }
+.field.changed label.name::after { content: " ●"; color: var(--accent); font-size: 10px; vertical-align: middle; }
+.settings-actions {
+  position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  justify-content: flex-end; background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 20px; box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.06);
+}
+.settings-actions .muted { margin-right: auto; }
 .toast {
   position: fixed; right: 24px; bottom: 24px; z-index: 20; max-width: 360px;
   background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
@@ -185,6 +230,10 @@ details summary { cursor: pointer; color: var(--text-secondary); }
 <body>
 <header>
   <h1>CloudflareFastCDN</h1>
+  <nav class="tabs" aria-label="页面">
+    <a href="#dashboard" id="tabDashboard" aria-current="page">概览</a>
+    <a href="#settings" id="tabSettings">设置</a>
+  </nav>
   <span id="phasePill" class="phase-pill"><span class="dot"></span><span id="phaseText">连接中…</span></span>
   <span id="conn" class="conn"></span>
   <span class="spacer"></span>
@@ -193,6 +242,13 @@ details summary { cursor: pointer; color: var(--text-secondary); }
 </header>
 
 <main>
+  <div id="setupBanner" class="banner" role="alert" hidden>
+    <span class="icon" aria-hidden="true">!</span>
+    <span><b>尚未完成 DNS 配置</b>：<span id="setupBannerText"></span></span>
+    <a href="#settings">前往设置</a>
+  </div>
+
+  <div id="viewDashboard" class="view">
   <section class="tiles" aria-label="概览">
     <div class="card tile">
       <div class="label">当前状态</div>
@@ -284,12 +340,23 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     <div id="logView" class="log-view" role="log" aria-live="off"></div>
   </section>
 
-  <section class="card">
-    <details>
-      <summary>运行配置</summary>
-      <div class="config-list" id="configList" style="margin-top: 12px"></div>
-    </details>
-  </section>
+  </div>
+
+  <div id="viewSettings" class="view" hidden>
+    <section class="card">
+      <h2>设置 <span class="sub" id="settingsFile"></span></h2>
+      <p class="settings-intro">保存后立即生效：周期、超时等参数从下一次检测开始使用；修改 DNS 服务商凭证或域名会自动安排一次全量优选。由环境变量或命令行参数指定的项目已锁定，只能通过修改环境变量调整。</p>
+      <div class="startup-list" id="startupInfo"></div>
+    </section>
+    <form id="settingsForm" class="view" novalidate>
+      <div id="settingsGroups" class="view"></div>
+      <div class="settings-actions">
+        <span class="muted" id="settingsDirty">没有未保存的修改</span>
+        <button type="button" id="btnSettingsReset">放弃修改</button>
+        <button type="submit" class="primary" id="btnSettingsSave">保存设置</button>
+      </div>
+    </form>
+  </div>
 </main>
 
 <div id="toast" class="toast" role="status"><span class="icon"></span><span class="msg"></span></div>
@@ -304,7 +371,8 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     'selecting': { label: '全量优选中', busy: true },
     'revalidating': { label: '复检中', busy: true },
     'waiting': { label: '等待中', busy: false },
-    'supplemental-check': { label: '补充检查', busy: true }
+    'supplemental-check': { label: '补充检查', busy: true },
+    'not-configured': { label: '待配置', busy: false }
   };
   const SERIES = [
     { rank: 1, name: 'Top1', color: 'var(--series-1)' },
@@ -421,7 +489,11 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const status = await response.json();
     state.clockSkew = new Date(status.serverTime).getTime() - Date.now();
+    const firstStatus = !state.status;
     state.status = status;
+    if (firstStatus && status.phase === 'not-configured' && !location.hash) {
+      location.hash = '#settings';
+    }
     renderStatus();
     if (status.historyVersion !== state.historyVersion) {
       state.historyVersion = status.historyVersion;
@@ -497,8 +569,12 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     pill.classList.toggle('busy', phase.busy);
     $('phaseText').textContent = status.phaseDetail ? `${phase.label} · ${status.phaseDetail}` : phase.label;
 
-    $('btnSelect').disabled = status.phase === 'selecting' || status.pendingAction === 'select';
-    $('btnRevalidate').disabled = status.phase === 'selecting' || status.phase === 'revalidating' || !!status.pendingAction;
+    const notConfigured = status.phase === 'not-configured';
+    $('setupBanner').hidden = !notConfigured;
+    $('setupBannerText').textContent = notConfigured ? status.phaseDetail || '' : '';
+
+    $('btnSelect').disabled = notConfigured || status.phase === 'selecting' || status.pendingAction === 'select';
+    $('btnRevalidate').disabled = notConfigured || status.phase === 'selecting' || status.phase === 'revalidating' || !!status.pendingAction;
     $('btnSelect').textContent = status.pendingAction === 'select' ? '优选已排队' : '立即优选';
     $('btnRevalidate').textContent = status.pendingAction === 'revalidate' ? '复检已排队' : '立即复检';
 
@@ -512,7 +588,6 @@ details summary { cursor: pointer; color: var(--text-secondary); }
       : `服务已运行 ${fmtDuration(serverNow() - new Date(status.startedAt).getTime())}`;
 
     renderAssigned(status);
-    renderConfig(status.config);
     tick();
   }
 
@@ -557,13 +632,228 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     }
   }
 
-  let configRendered = false;
-  function renderConfig(config) {
-    if (configRendered || !config) return;
-    configRendered = true;
-    const list = $('configList');
-    for (const item of config) {
-      list.append(el('div', null, el('span', { class: 'k', text: item.key }), el('span', { class: 'v', text: item.value })));
+  // ---------- 设置 ----------
+  const settingsState = { data: null, fields: new Map() };
+  const isSensitive = (item) => item.type === 'secret' || item.type === 'headers';
+  const splitDomains = (value) => value.split(/[\s,;，]+/).filter(Boolean);
+
+  async function loadSettings() {
+    const response = await api('/api/settings');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    settingsState.data = await response.json();
+    renderSettings();
+  }
+
+  function renderSettings() {
+    const data = settingsState.data;
+    if (!data) return;
+    $('settingsFile').textContent = `保存于 ${data.settingsFile}`;
+    $('startupInfo').replaceChildren(
+      el('span', { text: '启动参数（仅可通过环境变量或命令行设置，修改后需重启）：' }),
+      ...data.startup.map((item) => el('span', null, `${item.key} `, el('b', { text: item.value }))));
+
+    const container = $('settingsGroups');
+    container.replaceChildren();
+    settingsState.fields.clear();
+    for (const group of data.groups) {
+      const fields = el('div', { class: 'fields' });
+      for (const item of group.items) fields.append(createField(item));
+      container.append(el('section', { class: 'card' }, el('h2', { text: group.name }), fields));
+    }
+    updateDirty();
+  }
+
+  function sensitivePlaceholder(item) {
+    if (item.type === 'headers') {
+      return item.isSet ? `已设置：${item.hint}。留空保持不变，填写则整体替换` : 'Header-Name: Value，每行一个';
+    }
+    return item.isSet ? `已设置（${item.hint}），留空保持不变` : '未设置';
+  }
+
+  function createField(item) {
+    const id = `setting-${item.key}`;
+    const locked = item.source === 'locked';
+    const sensitive = isSensitive(item);
+    const field = el('div', { class: 'field' });
+    const entry = { item, field, cleared: false, original: '', read: () => '' };
+
+    const head = el('div', { class: 'field-head' },
+      el('label', { class: 'name', for: id, text: item.label }),
+      el('span', { class: 'key', text: item.key }));
+    if (item.restartRequired) head.append(el('span', { class: 'tag', text: '重启后生效' }));
+    field.append(head);
+
+    let control;
+    if (item.type === 'boolean') {
+      control = el('input', { type: 'checkbox', id });
+      control.checked = item.value === 'true';
+      entry.original = control.checked ? 'true' : 'false';
+      entry.read = () => (control.checked ? 'true' : 'false');
+      field.append(el('label', { class: 'switch' }, control, '启用'));
+    } else {
+      if (item.type === 'domains' || item.type === 'headers') {
+        control = el('textarea', { id, rows: item.type === 'headers' ? '3' : '2', spellcheck: 'false' });
+      } else {
+        const inputType = { secret: 'password', integer: 'number', url: 'url' }[item.type] || 'text';
+        control = el('input', {
+          id, type: inputType, spellcheck: 'false',
+          autocomplete: item.type === 'secret' ? 'new-password' : 'off',
+          min: item.type === 'integer' ? item.min : null,
+          max: item.type === 'integer' ? item.max : null
+        });
+      }
+
+      if (sensitive) {
+        control.placeholder = sensitivePlaceholder(item);
+      } else {
+        const value = item.type === 'domains' ? splitDomains(item.value || '').join('\n') : item.value || '';
+        control.value = value;
+        entry.original = value;
+        if (item.type === 'domains') control.placeholder = '每行一个域名，例如 cdn.example.com';
+        else if (item.defaultValue) control.placeholder = `默认 ${item.defaultValue}`;
+      }
+      entry.read = () => control.value.trim();
+
+      const row = el('div', { class: 'control-row' }, control);
+      if (sensitive && item.isSet && !locked) {
+        const clearButton = el('button', { type: 'button', text: '清除' });
+        clearButton.addEventListener('click', () => {
+          entry.cleared = !entry.cleared;
+          clearButton.textContent = entry.cleared ? '撤销清除' : '清除';
+          control.value = '';
+          control.disabled = entry.cleared;
+          control.placeholder = entry.cleared ? '保存后将清除此项' : sensitivePlaceholder(item);
+          updateDirty();
+        });
+        row.append(clearButton);
+      }
+      field.append(row);
+    }
+
+    control.disabled = locked;
+    control.addEventListener('input', () => { setFieldError(entry, ''); updateDirty(); });
+    control.addEventListener('change', updateDirty);
+
+    if (locked) {
+      field.append(el('div', { class: 'lock' },
+        el('span', { 'aria-hidden': 'true', text: '🔒 ' }),
+        `已由${item.lockedBy} 锁定，无法在页面中修改`));
+    }
+    const description = [item.description];
+    if (!sensitive && item.defaultValue) description.push(`默认 ${item.defaultValue}`);
+    if (item.type === 'integer' && item.min != null) description.push(`范围 ${item.min} ~ ${item.max}`);
+    field.append(el('div', { class: 'desc', text: description.join('；') }));
+    entry.error = el('div', { class: 'error', role: 'alert' });
+    field.append(entry.error);
+
+    settingsState.fields.set(item.key, entry);
+    return field;
+  }
+
+  function setFieldError(entry, message) {
+    entry.error.textContent = message;
+    entry.field.classList.toggle('invalid', !!message);
+  }
+
+  function entryChange(entry) {
+    const item = entry.item;
+    if (item.source === 'locked') return undefined;
+    if (isSensitive(item)) {
+      if (entry.cleared) return '';
+      const value = entry.read();
+      return value ? value : undefined;
+    }
+    const value = entry.read();
+    if (item.type === 'domains') {
+      const current = splitDomains(value).join(',');
+      return current === splitDomains(entry.original).join(',') ? undefined : current;
+    }
+    return value === entry.original ? undefined : value;
+  }
+
+  function collectChanges() {
+    const values = {};
+    for (const [key, entry] of settingsState.fields) {
+      const value = entryChange(entry);
+      if (value !== undefined) values[key] = value;
+    }
+    return values;
+  }
+
+  function updateDirty() {
+    let count = 0;
+    for (const entry of settingsState.fields.values()) {
+      const changed = entryChange(entry) !== undefined;
+      entry.field.classList.toggle('changed', changed);
+      if (changed) count++;
+    }
+    $('settingsDirty').textContent = count ? `${count} 项未保存的修改` : '没有未保存的修改';
+    $('btnSettingsSave').disabled = count === 0;
+    $('btnSettingsReset').disabled = count === 0;
+    return count;
+  }
+
+  $('btnSettingsReset').addEventListener('click', renderSettings);
+
+  $('settingsForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const values = collectChanges();
+    const keys = Object.keys(values);
+    if (keys.length === 0) return;
+    const needsRestart = keys.some((key) => settingsState.fields.get(key).item.restartRequired);
+
+    $('btnSettingsSave').disabled = true;
+    try {
+      const response = await api('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CFCDN-Action': '1' },
+        body: JSON.stringify({ values })
+      });
+      const result = await response.json().catch(() => ({ ok: false, message: `HTTP ${response.status}`, errors: {} }));
+      for (const entry of settingsState.fields.values()) setFieldError(entry, '');
+
+      if (!result.ok) {
+        let first = null;
+        for (const [key, message] of Object.entries(result.errors || {})) {
+          const entry = settingsState.fields.get(key);
+          if (!entry) continue;
+          setFieldError(entry, message);
+          first = first || entry;
+        }
+        if (first) first.field.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        showToast(false, result.message);
+        updateDirty();
+        return;
+      }
+
+      let message = result.message;
+      if (result.selectionQueued) message += '；DNS 配置已变更，已安排一次全量优选';
+      if (needsRestart) message += '；部分设置需重启后生效';
+      showToast(true, message);
+      await loadSettings();
+      refreshStatus().catch(() => {});
+    } catch (error) {
+      showToast(false, `保存失败：${error.message}`);
+      updateDirty();
+    }
+  });
+
+  // ---------- 页面切换 ----------
+  function route() {
+    const settings = location.hash === '#settings';
+    $('viewDashboard').hidden = settings;
+    $('viewSettings').hidden = !settings;
+    if (settings) {
+      $('tabSettings').setAttribute('aria-current', 'page');
+      $('tabDashboard').removeAttribute('aria-current');
+      if (!settingsState.data || updateDirty() === 0) {
+        loadSettings().catch((error) => showToast(false, `加载设置失败：${error.message}`));
+      }
+    } else {
+      $('tabDashboard').setAttribute('aria-current', 'page');
+      $('tabSettings').removeAttribute('aria-current');
+      renderLatency();
+      renderRunChart();
     }
   }
 
@@ -1073,6 +1363,9 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => { renderLatency(); renderRunChart(); }, 150);
   });
+
+  window.addEventListener('hashchange', route);
+  route();
 
   setInterval(tick, 1000);
   // 每分钟重绘一次图表，让时间窗口跟随当前时间滑动

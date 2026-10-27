@@ -7,6 +7,11 @@ namespace CloudflareFastCDN.Web
         FullSelection
     }
 
+    internal readonly record struct ManualRequest(ManualCommand Command, string Trigger)
+    {
+        public static ManualRequest None { get; } = new(ManualCommand.None, string.Empty);
+    }
+
     /// <summary>
     /// Web 管理页面向主循环发送手动指令；主循环在等待期间通过 <see cref="WaitAsync"/> 响应。
     /// </summary>
@@ -14,7 +19,7 @@ namespace CloudflareFastCDN.Web
     {
         private static readonly object SyncRoot = new();
         private static readonly SemaphoreSlim Signal = new(0, 1);
-        private static ManualCommand _pending = ManualCommand.None;
+        private static ManualRequest _pending = ManualRequest.None;
 
         public static ManualCommand Pending
         {
@@ -22,7 +27,7 @@ namespace CloudflareFastCDN.Web
             {
                 lock (SyncRoot)
                 {
-                    return _pending;
+                    return _pending.Command;
                 }
             }
         }
@@ -32,18 +37,22 @@ namespace CloudflareFastCDN.Web
             lock (SyncRoot)
             {
                 var phase = DashboardState.CurrentPhase;
+                if (phase == DashboardPhase.NotConfigured)
+                {
+                    return new ActionResponse(false, "尚未完成DNS配置，请先在设置页面填写DNS服务商凭证和域名");
+                }
+
                 if (phase == DashboardPhase.Selecting)
                 {
                     return new ActionResponse(false, "正在执行全量优选，请等待本轮完成");
                 }
 
-                if (_pending == ManualCommand.FullSelection)
+                if (_pending.Command == ManualCommand.FullSelection)
                 {
                     return new ActionResponse(false, "已有待执行的立即优选请求");
                 }
 
-                _pending = ManualCommand.FullSelection;
-                SignalLocked();
+                SetPendingLocked(new ManualRequest(ManualCommand.FullSelection, "手动触发"));
                 Console.WriteLine("收到Web管理页面的立即优选请求");
                 return new ActionResponse(true, phase == DashboardPhase.Waiting
                     ? "已开始立即优选"
@@ -56,18 +65,22 @@ namespace CloudflareFastCDN.Web
             lock (SyncRoot)
             {
                 var phase = DashboardState.CurrentPhase;
+                if (phase == DashboardPhase.NotConfigured)
+                {
+                    return new ActionResponse(false, "尚未完成DNS配置，请先在设置页面填写DNS服务商凭证和域名");
+                }
+
                 if (phase is DashboardPhase.Selecting or DashboardPhase.Revalidating)
                 {
                     return new ActionResponse(false, "当前正在优选或复检，请稍后再试");
                 }
 
-                if (_pending != ManualCommand.None)
+                if (_pending.Command != ManualCommand.None)
                 {
                     return new ActionResponse(false, "已有待执行的手动请求");
                 }
 
-                _pending = ManualCommand.Revalidate;
-                SignalLocked();
+                SetPendingLocked(new ManualRequest(ManualCommand.Revalidate, "手动复检"));
                 Console.WriteLine("收到Web管理页面的立即复检请求");
                 return new ActionResponse(true, phase == DashboardPhase.Waiting
                     ? "已开始复检已分配IP"
@@ -76,23 +89,42 @@ namespace CloudflareFastCDN.Web
         }
 
         /// <summary>
-        /// 等待指定时长，期间收到手动指令则提前返回该指令；超时返回 <see cref="ManualCommand.None"/>。
+        /// 由程序内部安排一次全量优选（例如DNS设置变更），正在进行的优选结束后也会再执行一次。
+        /// 尚未完成配置时不排队，配置完成后主循环会自行开始。
         /// </summary>
-        public static async Task<ManualCommand> WaitAsync(TimeSpan delay)
+        public static bool QueueFullSelection(string trigger)
+        {
+            lock (SyncRoot)
+            {
+                if (DashboardState.CurrentPhase == DashboardPhase.NotConfigured)
+                {
+                    return false;
+                }
+
+                SetPendingLocked(new ManualRequest(ManualCommand.FullSelection, trigger));
+                Console.WriteLine($"已安排一次全量优选，原因：{trigger}");
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// 等待指定时长，期间收到手动指令则提前返回该指令；超时返回 <see cref="ManualRequest.None"/>。
+        /// </summary>
+        public static async Task<ManualRequest> WaitAsync(TimeSpan delay)
         {
             var deadline = DateTimeOffset.UtcNow + delay;
             while (true)
             {
-                var command = TakePending();
-                if (command != ManualCommand.None)
+                var request = TakePending();
+                if (request.Command != ManualCommand.None)
                 {
-                    return command;
+                    return request;
                 }
 
                 var remaining = deadline - DateTimeOffset.UtcNow;
                 if (remaining <= TimeSpan.Zero)
                 {
-                    return ManualCommand.None;
+                    return ManualRequest.None;
                 }
 
                 // 信号可能来自已被消费的旧指令，循环重新检查即可
@@ -107,7 +139,7 @@ namespace CloudflareFastCDN.Web
         {
             lock (SyncRoot)
             {
-                _pending = ManualCommand.None;
+                _pending = ManualRequest.None;
             }
         }
 
@@ -118,25 +150,26 @@ namespace CloudflareFastCDN.Web
         {
             lock (SyncRoot)
             {
-                if (_pending == ManualCommand.Revalidate)
+                if (_pending.Command == ManualCommand.Revalidate)
                 {
-                    _pending = ManualCommand.None;
+                    _pending = ManualRequest.None;
                 }
             }
         }
 
-        private static ManualCommand TakePending()
+        private static ManualRequest TakePending()
         {
             lock (SyncRoot)
             {
-                var command = _pending;
-                _pending = ManualCommand.None;
-                return command;
+                var request = _pending;
+                _pending = ManualRequest.None;
+                return request;
             }
         }
 
-        private static void SignalLocked()
+        private static void SetPendingLocked(ManualRequest request)
         {
+            _pending = request;
             if (Signal.CurrentCount == 0)
             {
                 Signal.Release();

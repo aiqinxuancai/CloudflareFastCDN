@@ -1,3 +1,4 @@
+using CloudflareFastCDN.Settings;
 using CloudflareFastCDN.Utils;
 using System.Net;
 using System.Security.Cryptography;
@@ -86,6 +87,40 @@ namespace CloudflareFastCDN.Web
                 var page = LogBuffer.Read(Math.Max(0, after), Math.Min(limit, MaxLogLimit));
                 return Results.Bytes(JsonSerializer.SerializeToUtf8Bytes(page, WebJsonContext.Default.LogPage), "application/json");
             });
+            app.MapGet("/api/settings", () => Results.Json(SettingsManager.GetSettings(), SettingsJsonContext.Default.SettingsResponse));
+            app.MapPost("/api/settings", async (HttpContext context) =>
+            {
+                if (!context.Request.Headers.ContainsKey(ActionHeaderName))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                SettingsUpdateRequest? request;
+                try
+                {
+                    request = await JsonSerializer.DeserializeAsync(context.Request.Body, SettingsJsonContext.Default.SettingsUpdateRequest);
+                }
+                catch (JsonException)
+                {
+                    request = null;
+                }
+
+                if (request == null)
+                {
+                    return Results.BadRequest();
+                }
+
+                var response = SettingsManager.Update(request.Values);
+                if (response.Ok && response.DnsChanged)
+                {
+                    response.SelectionQueued = RuntimeControl.QueueFullSelection("DNS配置变更");
+                }
+
+                return Results.Json(
+                    response,
+                    SettingsJsonContext.Default.SettingsUpdateResponse,
+                    statusCode: response.Ok ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest);
+            });
             app.MapPost("/api/actions/select", (HttpContext context) => HandleAction(context, RuntimeControl.RequestFullSelection));
             app.MapPost("/api/actions/revalidate", (HttpContext context) => HandleAction(context, RuntimeControl.RequestRevalidation));
 
@@ -104,7 +139,7 @@ namespace CloudflareFastCDN.Web
             Console.WriteLine($"Web管理页面已启动：http://{displayHost}:{AppConfig.WebPort}/");
             if (string.IsNullOrEmpty(AppConfig.WebPassword))
             {
-                Console.WriteLine("WEB_PASSWORD 未设置，Web管理页面无需登录即可访问；如需暴露到公网请务必设置密码");
+                Console.WriteLine("未设置登录密码（WEB_PASSWORD），Web管理页面无需登录即可访问并修改设置；请尽快在设置页面中设置密码");
             }
 
             return app;

@@ -9,7 +9,7 @@
 1. 首次启动解析已配置域名的当前 IPv4 地址并各做一次 HTTP 检查，全部正常时跳过首次全量优选
 2. 需要全量优选时，从 Cloudflare IPv4 网段按 `/24` 子网抽样
 3. 多轮 ICMP Ping 筛选低延迟候选 IP
-4. HTTP 连通性验证，可选带宽测速（`BANDWIDTH_PRIORITY=true`）
+4. HTTP 连通性验证，可选带宽测速（带宽优先）
 5. 子网缓存（`subnet_cache.json`）加速历史优质节点复用
 6. 按排名依次更新 `*_DOMAINS` / `*_DOMAINS2` / `*_DOMAINS3` 的 A 记录
 7. 等待 `RUN_MINUTES` 后先复检已分配 IP；全部正常则跳过全量优选，否则进入下一轮全量优选；启用补充检查时，等待期间每 5 分钟验证一次当前最优 IP
@@ -20,10 +20,10 @@
 
 ```bash
 cp .env.example .env
-# 编辑 .env，至少填写一组 DNS 服务商凭证及对应域名
 docker compose up -d
-docker compose logs -f cloudflare-fast-cdn
 ```
+
+启动后访问 `http://<主机IP>:19401/`，首次启动会自动进入「设置」页面，填写 DNS 服务商凭证和域名并保存后即开始优选。**请同时在设置页面中设置登录密码**。
 
 默认拉取 `ghcr.io/aiqinxuancai/cloudflarefastcdn:latest`。可在 `.env` 中修改 `IMAGE_TAG` 固定版本；如果 GHCR 软件包为私有，请先执行 `docker login ghcr.io`。
 
@@ -33,12 +33,8 @@ docker compose logs -f cloudflare-fast-cdn
 docker run -d \
   --name cloudflare-fast-cdn \
   --restart unless-stopped \
+  --cap-add NET_RAW \
   -e TZ=Asia/Shanghai \
-  -e CLOUDFLARE_KEY=your_cf_api_token \
-  -e CLOUDFLARE_DOMAINS=cdn-cf.example.com \
-  -e HTTP_PROBE_URL=https://www.visa.cn/ \
-  -e RUN_MINUTES=60 \
-  -e WEB_PASSWORD=your_web_password \
   -p 19401:19401 \
   -v cloudflare-fast-cdn-data:/data \
   ghcr.io/aiqinxuancai/cloudflarefastcdn:latest
@@ -47,44 +43,63 @@ docker run -d \
 ### 直接运行
 
 ```bash
-CloudflareFastCDN \
-  --CLOUDFLARE_KEY=your_cf_api_token \
-  --CLOUDFLARE_DOMAINS=cdn-cf.example.com \
-  --HTTP_PROBE_URL=https://www.visa.cn/ \
-  --RUN_MINUTES=60
+CloudflareFastCDN
 ```
 
-> 参数优先级：环境变量 > 命令行参数。多个域名用英文逗号分隔。
+直接运行时管理页面默认只监听 `127.0.0.1`，需要从其他设备访问时使用 `--WEB_HOST=0.0.0.0` 启动。
 
 ## Web 管理页面
 
-程序内置 Web 管理页面，默认监听 `19401` 端口，启动后访问 `http://<主机IP>:19401/`：
+程序内置 Web 管理页面，默认监听 `19401` 端口：
 
-- 查看当前运行阶段、下次复检倒计时、已分配 IP 及其基线/最近延迟
-- 折线图展示已分配 IP 的 HTTP 延迟趋势和每轮优选的 Top1 延迟，支持 6 小时 / 24 小时 / 7 天 / 30 天 / 全部时间范围
-- 查看正在进行或最近一次优选的候选 IP 验证结果、DNS 更新结果，以及历史优选记录
-- 实时查看运行日志，支持关键字筛选
+- **概览**：当前运行阶段、下次复检倒计时、已分配 IP 及其基线/最近延迟
+- **折线图**：已分配 IP 的 HTTP 延迟趋势和每轮优选的 Top1 延迟，支持 6 小时 / 24 小时 / 7 天 / 30 天 / 全部时间范围
+- **优选详情**：正在进行或最近一次优选的候选 IP 验证结果、DNS 更新结果，以及历史优选记录
+- **运行日志**：实时查看，支持关键字筛选
 - **立即优选**：立即执行一次全量优选并更新 DNS；当前处于复检或预检时会排队，在其完成后执行
 - **立即复检**：提前结束等待，立即复检已分配 IP，不通过时自动进入全量优选
+- **设置**：在页面中修改下方「运行设置」的全部项目
 
-Docker 环境默认监听 `0.0.0.0`，直接运行时默认仅监听 `127.0.0.1`。设置 `WEB_PASSWORD` 后访问需要 HTTP Basic 认证（用户名默认为 `admin`），**暴露到局域网或公网时务必设置密码**。延迟历史与优选记录保存在 `web_history.json`（Docker 下为 `/data/web_history.json`），重启后保留。
+设置保存在 `settings.json`（Docker 下为 `/data/settings.json`），保存后立即生效：周期、超时等参数从下一次检测开始使用；修改 DNS 服务商凭证或域名会自动安排一次全量优选；标注「重启后生效」的项目需重启程序。密钥类设置只写不读，页面上仅显示前几位。
+
+延迟历史与优选记录保存在 `web_history.json`（Docker 下为 `/data/web_history.json`），重启后保留。
+
+设置登录密码后访问需要 HTTP Basic 认证，**暴露到局域网或公网时务必设置密码**；未设置密码时任何能访问该端口的人都可以查看和修改设置。
 
 ## 配置参数
 
-### DNS 服务商
+### 环境变量与锁定
+
+下方所有「运行设置」都可以在 Web 页面中修改，也可以继续通过环境变量或命令行参数（`--KEY=VALUE`，仅非 Docker 环境）指定。取值优先级为：
+
+**环境变量 > 命令行参数 > Web 页面保存的设置 > 默认值**
+
+通过环境变量或命令行参数指定的项目会在 Web 页面中**锁定为只读**，适合需要由部署配置统一管理的场景。值为空的环境变量视为未设置。从旧版本升级时，原有 `.env` 中填写的项目会保持生效并被锁定；如需改为在页面中管理，删除或注释 `.env` 中对应的行后重建容器即可。
+
+### 启动参数
+
+以下参数只能通过环境变量或命令行参数设置，修改后需重启：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `WEB_PORT` | `19401` | Web 管理页面端口，`0` 表示关闭；关闭后只能通过环境变量配置，且缺少 DNS 配置时程序直接退出 |
+| `WEB_HOST` | Docker：`0.0.0.0`；直接运行：`127.0.0.1` | Web 管理页面监听地址 |
+| `TZ` | `Etc/UTC` | Docker 环境下用于决定日志输出时区，例如 `Asia/Shanghai` |
+
+### 运行设置 · DNS 服务商
 
 至少配置一组域名，只配置了域名的服务商才需要填写对应凭证。
 
 | 参数 | 说明 |
 | --- | --- |
 | `CLOUDFLARE_KEY` | Cloudflare API Token（需 DNS 编辑权限） |
-| `CLOUDFLARE_DOMAINS` / `DOMAINS2` / `DOMAINS3` | 第 1 / 2 / 3 名 IP 更新的域名 |
+| `CLOUDFLARE_DOMAINS` / `DOMAINS2` / `DOMAINS3` | 第 1 / 2 / 3 名 IP 更新的域名（兼容旧变量 `DOMAINS` / `DOMAINS2` / `DOMAINS3`） |
 | `TENCENTCLOUD_SECRET_ID` / `SECRET_KEY` | 腾讯云 API 凭证 |
 | `TENCENTCLOUD_DOMAINS` / `DOMAINS2` / `DOMAINS3` | 第 1 / 2 / 3 名 IP 更新的域名 |
 | `ALIBABACLOUD_ACCESS_KEY_ID` / `ACCESS_KEY_SECRET` | 阿里云 API 凭证 |
 | `ALIBABACLOUD_DOMAINS` / `DOMAINS2` / `DOMAINS3` | 第 1 / 2 / 3 名 IP 更新的域名 |
 
-### 通用参数
+### 运行设置 · 通用
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -92,20 +107,17 @@ Docker 环境默认监听 `0.0.0.0`，直接运行时默认仅监听 `127.0.0.1`
 | `MAX_IPS` | `400` | 每轮最多抽样 IP 数 |
 | `PING_INTERVAL_MS` | `150` | 单次 Ping 间隔（毫秒） |
 | `HTTP_PROBE_URL` | `https://www.visa.cn/` | HTTP 验证地址，建议使用自己的站点，必须开CF代理（黄云） |
-| `HTTP_PROBE_HEADERS` | 空 | HTTP 验证和测速请求附加请求头，格式为 `Header-Name:Value;Another-Header:Value` |
+| `HTTP_PROBE_HEADERS` | 空 | HTTP 验证和测速请求附加请求头，环境变量格式为 `Header-Name:Value;Another-Header:Value`，页面中每行一个 |
 | `HTTP_PROBE_TIMEOUT_MS` | `4000` | HTTP 验证超时（毫秒） |
 | `HTTP_SPEEDTEST_TIMEOUT_MS` | `10000` | 测速总超时（毫秒） |
 | `HTTP_SPEEDTEST_IDLE_TIMEOUT_MS` | `3000` | 测速读取空闲超时（毫秒） |
 | `RUN_MINUTES` | `60` | 每轮完成后等待分钟数 |
 | `BANDWIDTH_PRIORITY` | `false` | `true` 时启用带宽优选（下载 `/speedtest` 测速），失败自动回退延迟优选 |
-| `UPDATE_IP_LIST` | `false` | 启动时更新 Cloudflare 官方 IPv4 网段列表 |
+| `UPDATE_IP_LIST` | `false` | 启动时更新 Cloudflare 官方 IPv4 网段列表（重启后生效） |
 | `ENABLE_SUPPLEMENTAL_HTTP_CHECK` | `false` | 等待期间每 5 分钟补充验证当前最优 IP，连续 3 次失败则提前重新优选 |
-| `FORCE_INITIAL_FULL_SELECTION` | `false` | `true` 时跳过首次域名 IP 预检并强制执行全量优选 |
-| `WEB_PORT` | `19401` | Web 管理页面端口，`0` 表示关闭 |
-| `WEB_HOST` | Docker：`0.0.0.0`；直接运行：`127.0.0.1` | Web 管理页面监听地址 |
+| `FORCE_INITIAL_FULL_SELECTION` | `false` | `true` 时跳过首次域名 IP 预检并强制执行全量优选（重启后生效） |
 | `WEB_USERNAME` | `admin` | Web 管理页面登录用户名 |
 | `WEB_PASSWORD` | 空 | Web 管理页面登录密码，留空则无需登录 |
-| `TZ` | `Etc/UTC` | Docker 环境下用于决定日志输出时区，例如 `Asia/Shanghai` |
 
 所有控制台日志都会携带标准时间戳，格式为 `yyyy-MM-dd HH:mm:ss.fff zzz`。
 

@@ -9,7 +9,8 @@ namespace CloudflareFastCDN.Web
         Selecting,
         Revalidating,
         Waiting,
-        SupplementalCheck
+        SupplementalCheck,
+        NotConfigured
     }
 
     /// <summary>
@@ -31,7 +32,6 @@ namespace CloudflareFastCDN.Web
         private static List<SelectionRun> _runs = new();
         private static List<AssignedIpInfo> _assignedIps = new();
         private static List<DomainGroupInfo> _domainGroups = new();
-        private static List<ConfigItem> _config = new();
         private static DashboardPhase _phase = DashboardPhase.Starting;
         private static string? _phaseDetail;
         private static DateTimeOffset _phaseStartedAt = DateTimeOffset.Now;
@@ -50,13 +50,19 @@ namespace CloudflareFastCDN.Web
             }
         }
 
-        public static void Initialize(List<ConfigItem> config, List<DomainGroupInfo> domainGroups)
+        public static void Initialize()
         {
             lock (SyncRoot)
             {
-                _config = config;
-                _domainGroups = domainGroups;
                 LoadHistory();
+            }
+        }
+
+        public static void SetDomainGroups(List<DomainGroupInfo> domainGroups)
+        {
+            lock (SyncRoot)
+            {
+                _domainGroups = domainGroups;
             }
         }
 
@@ -240,7 +246,6 @@ namespace CloudflareFastCDN.Web
                     },
                     AssignedIps = _assignedIps,
                     DomainGroups = _domainGroups,
-                    Config = _config,
                     CurrentRun = _currentRun,
                     CompletedRuns = _runs.Count,
                     LastRunFinishedAt = _runs.Count > 0 ? _runs[^1].FinishedAt : null,
@@ -329,6 +334,7 @@ namespace CloudflareFastCDN.Web
                 DashboardPhase.Revalidating => "revalidating",
                 DashboardPhase.Waiting => "waiting",
                 DashboardPhase.SupplementalCheck => "supplemental-check",
+                DashboardPhase.NotConfigured => "not-configured",
                 _ => "unknown"
             };
         }
@@ -355,7 +361,6 @@ namespace CloudflareFastCDN.Web
         public string? PendingAction { get; set; }
         public List<AssignedIpInfo> AssignedIps { get; set; } = new();
         public List<DomainGroupInfo> DomainGroups { get; set; } = new();
-        public List<ConfigItem> Config { get; set; } = new();
         public SelectionRun? CurrentRun { get; set; }
         public int CompletedRuns { get; set; }
         public DateTimeOffset? LastRunFinishedAt { get; set; }
@@ -441,11 +446,5 @@ namespace CloudflareFastCDN.Web
         public int Rank { get; set; }
         public string Provider { get; set; } = string.Empty;
         public List<string> Domains { get; set; } = new();
-    }
-
-    internal sealed class ConfigItem
-    {
-        public string Key { get; set; } = string.Empty;
-        public string Value { get; set; } = string.Empty;
     }
 }

@@ -13,7 +13,6 @@ namespace CloudflareFastCDN.Utils
     {
         private const int PingTimeout = 1000;
 
-        private static int Threads = AppConfig.PingThreads;
         private static int PingCount = 4;
 
         private List<IPAddress> ips;
@@ -25,7 +24,7 @@ namespace CloudflareFastCDN.Utils
             PingCount = pingCount;
             ips = ipList;
             csv = new List<PingData>();
-            semaphore = new SemaphoreSlim(Threads);
+            semaphore = new SemaphoreSlim(Math.Max(1, AppConfig.PingThreads));
         }
 
         public async Task<List<PingData>> RunAsync()
