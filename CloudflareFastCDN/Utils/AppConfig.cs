@@ -31,5 +31,10 @@ namespace CloudflareFastCDN.Utils
         public static bool UpdateIPList { get; set; } = false;
         public static bool EnableSupplementalHttpCheck { get; set; } = false;
         public static bool ForceInitialFullSelection { get; set; } = false;
+
+        public static int WebPort { get; set; } = 19401;
+        public static string WebHost { get; set; } = "127.0.0.1";
+        public static string WebUsername { get; set; } = "admin";
+        public static string WebPassword { get; set; } = string.Empty;
     }
 }

@@ -1,3 +1,4 @@
+using CloudflareFastCDN.Web;
 using System.Text;
 
 namespace CloudflareFastCDN.Utils
@@ -23,8 +24,8 @@ namespace CloudflareFastCDN.Utils
 
             ResolveTimeZone(isDocker);
 
-            Console.SetOut(new TimestampTextWriter(standardOutput, () => Now));
-            Console.SetError(new TimestampTextWriter(standardError, () => Now));
+            Console.SetOut(new TimestampTextWriter(standardOutput, () => Now, LogBuffer.Append));
+            Console.SetError(new TimestampTextWriter(standardError, () => Now, LogBuffer.Append));
 
             if (isDocker &&
                 !string.IsNullOrWhiteSpace(RequestedTimeZoneId) &&
@@ -66,13 +67,17 @@ namespace CloudflareFastCDN.Utils
     {
         private readonly TextWriter _innerWriter;
         private readonly Func<DateTimeOffset> _timestampProvider;
+        private readonly Action<DateTimeOffset, string>? _lineSink;
+        private readonly StringBuilder _currentLine = new();
         private readonly object _syncRoot = new();
+        private DateTimeOffset _currentLineTime;
         private bool _isLineStart = true;
 
-        public TimestampTextWriter(TextWriter innerWriter, Func<DateTimeOffset> timestampProvider)
+        public TimestampTextWriter(TextWriter innerWriter, Func<DateTimeOffset> timestampProvider, Action<DateTimeOffset, string>? lineSink = null)
         {
             _innerWriter = innerWriter;
             _timestampProvider = timestampProvider;
+            _lineSink = lineSink;
         }
 
         public override Encoding Encoding => _innerWriter.Encoding;
@@ -124,6 +129,7 @@ namespace CloudflareFastCDN.Utils
                 _innerWriter.Write(NewLine);
                 _innerWriter.Flush();
                 _isLineStart = true;
+                CompleteLine();
             }
         }
 
@@ -143,6 +149,7 @@ namespace CloudflareFastCDN.Utils
                 _innerWriter.Write(NewLine);
                 _innerWriter.Flush();
                 _isLineStart = true;
+                CompleteLine();
             }
         }
 
@@ -163,11 +170,19 @@ namespace CloudflareFastCDN.Utils
             {
                 _innerWriter.Flush();
                 _isLineStart = true;
+                CompleteLine();
             }
             else if (value != '\r')
             {
                 _isLineStart = false;
+                _currentLine.Append(value);
             }
+        }
+
+        private void CompleteLine()
+        {
+            _lineSink?.Invoke(_currentLineTime, _currentLine.ToString());
+            _currentLine.Clear();
         }
 
         private void EnsureTimestampPrefix()
@@ -177,7 +192,8 @@ namespace CloudflareFastCDN.Utils
                 return;
             }
 
-            _innerWriter.Write($"[{_timestampProvider().ToString(TimestampedConsole.TimestampFormatPattern)}] ");
+            _currentLineTime = _timestampProvider();
+            _innerWriter.Write($"[{_currentLineTime.ToString(TimestampedConsole.TimestampFormatPattern)}] ");
             _isLineStart = false;
         }
     }

@@ -1,5 +1,6 @@
 using CloudflareFastCDN.Services;
 using CloudflareFastCDN.Utils;
+using CloudflareFastCDN.Web;
 using System.Net;
 using System.Net.Sockets;
 
@@ -50,7 +51,13 @@ namespace CloudflareFastCDN
                 return;
             }
 
-            PrintStartupConfiguration(isDocker, dnsUpdateProviders);
+            var configurationSummary = BuildConfigurationSummary(isDocker, dnsUpdateProviders);
+            PrintStartupConfiguration(configurationSummary);
+
+            DashboardState.Initialize(
+                configurationSummary.Select(item => new ConfigItem { Key = item.Key, Value = item.Value }).ToList(),
+                BuildDomainGroups(dnsUpdateProviders));
+            await WebServer.StartAsync();
 
             if (AppConfig.UpdateIPList)
             {
@@ -61,20 +68,20 @@ namespace CloudflareFastCDN
             if (AppConfig.ForceInitialFullSelection)
             {
                 Console.WriteLine("FORCE_INITIAL_FULL_SELECTION 已启用，首次启动直接进行全量优选");
-                selection = await SingleSelect(dnsUpdateProviders);
+                selection = await SingleSelect(dnsUpdateProviders, "首次启动");
             }
             else
             {
                 selection = await TryCreateInitialSelectionFromDomains(dnsUpdateProviders)
-                    ?? await SingleSelect(dnsUpdateProviders);
+                    ?? await SingleSelect(dnsUpdateProviders, "首次启动");
             }
 
             while (true)
             {
-                var shouldRunFullSelection = await WaitForNextSelection(selection);
-                if (shouldRunFullSelection)
+                var fullSelectionTrigger = await WaitForNextSelection(selection);
+                if (fullSelectionTrigger != null)
                 {
-                    selection = await SingleSelect(dnsUpdateProviders);
+                    selection = await SingleSelect(dnsUpdateProviders, fullSelectionTrigger);
                 }
             }
         }
@@ -136,7 +143,11 @@ namespace CloudflareFastCDN
                 BandwidthPriority = ResolveSetting("BANDWIDTH_PRIORITY", "false"),
                 UpdateIPList = ResolveSetting("UPDATE_IP_LIST", "false"),
                 EnableSupplementalHttpCheck = ResolveSetting("ENABLE_SUPPLEMENTAL_HTTP_CHECK", "false"),
-                ForceInitialFullSelection = ResolveSetting("FORCE_INITIAL_FULL_SELECTION", "false")
+                ForceInitialFullSelection = ResolveSetting("FORCE_INITIAL_FULL_SELECTION", "false"),
+                WebPort = ResolveSetting("WEB_PORT", "19401"),
+                WebHost = ResolveSetting("WEB_HOST", isDocker ? "0.0.0.0" : "127.0.0.1"),
+                WebUsername = ResolveSetting("WEB_USERNAME", "admin"),
+                WebPassword = ResolveSetting("WEB_PASSWORD")
             };
         }
 
@@ -171,6 +182,10 @@ namespace CloudflareFastCDN
             AppConfig.UpdateIPList = ParseBoolWithDefault(config.UpdateIPList, false);
             AppConfig.EnableSupplementalHttpCheck = ParseBoolWithDefault(config.EnableSupplementalHttpCheck, false);
             AppConfig.ForceInitialFullSelection = ParseBoolWithDefault(config.ForceInitialFullSelection, false);
+            AppConfig.WebPort = int.TryParse(config.WebPort, out var webPort) && webPort is >= 0 and <= 65535 ? webPort : 19401;
+            AppConfig.WebHost = string.IsNullOrWhiteSpace(config.WebHost) ? "127.0.0.1" : config.WebHost.Trim();
+            AppConfig.WebUsername = string.IsNullOrWhiteSpace(config.WebUsername) ? "admin" : config.WebUsername.Trim();
+            AppConfig.WebPassword = config.WebPassword?.Trim() ?? string.Empty;
         }
 
         private static List<DnsUpdateProvider> BuildDnsUpdateProviders()
@@ -330,54 +345,87 @@ namespace CloudflareFastCDN
             return bool.TryParse(value, out var result) ? result : defaultValue;
         }
 
-        private static void PrintStartupConfiguration(bool isDocker, IReadOnlyList<DnsUpdateProvider> dnsUpdateProviders)
+        private static List<KeyValuePair<string, string>> BuildConfigurationSummary(bool isDocker, IReadOnlyList<DnsUpdateProvider> dnsUpdateProviders)
         {
-            Console.WriteLine("启动配置：");
-            Console.WriteLine($"  运行环境: {(isDocker ? "Docker" : "Local")}");
-            Console.WriteLine($"  日志时间格式: {TimestampedConsole.TimestampFormatPattern}");
-            Console.WriteLine($"  日志时区: {TimestampedConsole.EffectiveTimeZoneId}");
+            var summary = new List<KeyValuePair<string, string>>();
+            void Add(string key, object value) => summary.Add(new KeyValuePair<string, string>(key, value.ToString() ?? string.Empty));
+            void AddDomainGroup(string variableName, IReadOnlyCollection<string> domains)
+            {
+                if (domains.Count > 0)
+                {
+                    Add(variableName, string.Join(",", domains));
+                }
+            }
+
+            Add("运行环境", isDocker ? "Docker" : "Local");
+            Add("日志时间格式", TimestampedConsole.TimestampFormatPattern);
+            Add("日志时区", TimestampedConsole.EffectiveTimeZoneId);
             if (isDocker)
             {
-                Console.WriteLine($"  TZ: {TimestampedConsole.RequestedTimeZoneId ?? "(not set)"}");
+                Add("TZ", TimestampedConsole.RequestedTimeZoneId ?? "(not set)");
             }
-            Console.WriteLine($"  DNS提供商: {string.Join(", ", dnsUpdateProviders.Select(provider => provider.ProviderName))}");
-            Console.WriteLine($"  CLOUDFLARE_KEY: {MaskSecret(AppConfig.CloudflareKey)}");
-            Console.WriteLine($"  TENCENTCLOUD_SECRET_ID: {MaskSecret(AppConfig.TencentCloudSecretId)}");
-            Console.WriteLine($"  TENCENTCLOUD_SECRET_KEY: {MaskSecret(AppConfig.TencentCloudSecretKey)}");
-            Console.WriteLine($"  ALIBABACLOUD_ACCESS_KEY_ID: {MaskSecret(AppConfig.AlibabaCloudAccessKeyId)}");
-            Console.WriteLine($"  ALIBABACLOUD_ACCESS_KEY_SECRET: {MaskSecret(AppConfig.AlibabaCloudAccessKeySecret)}");
+            Add("DNS提供商", string.Join(", ", dnsUpdateProviders.Select(provider => provider.ProviderName)));
+            Add("CLOUDFLARE_KEY", MaskSecret(AppConfig.CloudflareKey));
+            Add("TENCENTCLOUD_SECRET_ID", MaskSecret(AppConfig.TencentCloudSecretId));
+            Add("TENCENTCLOUD_SECRET_KEY", MaskSecret(AppConfig.TencentCloudSecretKey));
+            Add("ALIBABACLOUD_ACCESS_KEY_ID", MaskSecret(AppConfig.AlibabaCloudAccessKeyId));
+            Add("ALIBABACLOUD_ACCESS_KEY_SECRET", MaskSecret(AppConfig.AlibabaCloudAccessKeySecret));
 
-            PrintDomainGroup("CLOUDFLARE_DOMAINS", AppConfig.CloudflareDomains);
-            PrintDomainGroup("CLOUDFLARE_DOMAINS2", AppConfig.CloudflareDomains2);
-            PrintDomainGroup("CLOUDFLARE_DOMAINS3", AppConfig.CloudflareDomains3);
-            PrintDomainGroup("TENCENTCLOUD_DOMAINS", AppConfig.TencentCloudDomains);
-            PrintDomainGroup("TENCENTCLOUD_DOMAINS2", AppConfig.TencentCloudDomains2);
-            PrintDomainGroup("TENCENTCLOUD_DOMAINS3", AppConfig.TencentCloudDomains3);
-            PrintDomainGroup("ALIBABACLOUD_DOMAINS", AppConfig.AlibabaCloudDomains);
-            PrintDomainGroup("ALIBABACLOUD_DOMAINS2", AppConfig.AlibabaCloudDomains2);
-            PrintDomainGroup("ALIBABACLOUD_DOMAINS3", AppConfig.AlibabaCloudDomains3);
+            AddDomainGroup("CLOUDFLARE_DOMAINS", AppConfig.CloudflareDomains);
+            AddDomainGroup("CLOUDFLARE_DOMAINS2", AppConfig.CloudflareDomains2);
+            AddDomainGroup("CLOUDFLARE_DOMAINS3", AppConfig.CloudflareDomains3);
+            AddDomainGroup("TENCENTCLOUD_DOMAINS", AppConfig.TencentCloudDomains);
+            AddDomainGroup("TENCENTCLOUD_DOMAINS2", AppConfig.TencentCloudDomains2);
+            AddDomainGroup("TENCENTCLOUD_DOMAINS3", AppConfig.TencentCloudDomains3);
+            AddDomainGroup("ALIBABACLOUD_DOMAINS", AppConfig.AlibabaCloudDomains);
+            AddDomainGroup("ALIBABACLOUD_DOMAINS2", AppConfig.AlibabaCloudDomains2);
+            AddDomainGroup("ALIBABACLOUD_DOMAINS3", AppConfig.AlibabaCloudDomains3);
 
-            Console.WriteLine($"  PING_THREADS: {AppConfig.PingThreads}");
-            Console.WriteLine($"  MAX_IPS: {AppConfig.MaxIps}");
-            Console.WriteLine($"  PING_INTERVAL_MS: {AppConfig.PingIntervalMs}");
-            Console.WriteLine($"  HTTP_PROBE_URL: {AppConfig.HttpProbeUrl}");
-            Console.WriteLine($"  HTTP_PROBE_HEADERS: {FormatHeaderNames(AppConfig.HttpProbeHeaders)}");
-            Console.WriteLine($"  HTTP_PROBE_TIMEOUT_MS: {AppConfig.HttpProbeTimeoutMs}");
-            Console.WriteLine($"  HTTP_SPEEDTEST_TIMEOUT_MS: {AppConfig.HttpSpeedTestTimeoutMs}");
-            Console.WriteLine($"  HTTP_SPEEDTEST_IDLE_TIMEOUT_MS: {AppConfig.HttpSpeedTestIdleTimeoutMs}");
-            Console.WriteLine($"  RUN_MINUTES: {AppConfig.RunMinutes}");
-            Console.WriteLine($"  BANDWIDTH_PRIORITY: {AppConfig.BandwidthPriority}");
-            Console.WriteLine($"  UPDATE_IP_LIST: {AppConfig.UpdateIPList}");
-            Console.WriteLine($"  ENABLE_SUPPLEMENTAL_HTTP_CHECK: {AppConfig.EnableSupplementalHttpCheck}");
-            Console.WriteLine($"  FORCE_INITIAL_FULL_SELECTION: {AppConfig.ForceInitialFullSelection}");
+            Add("PING_THREADS", AppConfig.PingThreads);
+            Add("MAX_IPS", AppConfig.MaxIps);
+            Add("PING_INTERVAL_MS", AppConfig.PingIntervalMs);
+            Add("HTTP_PROBE_URL", AppConfig.HttpProbeUrl);
+            Add("HTTP_PROBE_HEADERS", FormatHeaderNames(AppConfig.HttpProbeHeaders));
+            Add("HTTP_PROBE_TIMEOUT_MS", AppConfig.HttpProbeTimeoutMs);
+            Add("HTTP_SPEEDTEST_TIMEOUT_MS", AppConfig.HttpSpeedTestTimeoutMs);
+            Add("HTTP_SPEEDTEST_IDLE_TIMEOUT_MS", AppConfig.HttpSpeedTestIdleTimeoutMs);
+            Add("RUN_MINUTES", AppConfig.RunMinutes);
+            Add("BANDWIDTH_PRIORITY", AppConfig.BandwidthPriority);
+            Add("UPDATE_IP_LIST", AppConfig.UpdateIPList);
+            Add("ENABLE_SUPPLEMENTAL_HTTP_CHECK", AppConfig.EnableSupplementalHttpCheck);
+            Add("FORCE_INITIAL_FULL_SELECTION", AppConfig.ForceInitialFullSelection);
+            Add("WEB_PORT", AppConfig.WebPort);
+            Add("WEB_HOST", AppConfig.WebHost);
+            Add("WEB_USERNAME", AppConfig.WebUsername);
+            Add("WEB_PASSWORD", MaskSecret(AppConfig.WebPassword));
+            return summary;
         }
 
-        private static void PrintDomainGroup(string variableName, IReadOnlyCollection<string> domains)
+        private static void PrintStartupConfiguration(IEnumerable<KeyValuePair<string, string>> configurationSummary)
         {
-            if (domains.Count > 0)
+            Console.WriteLine("启动配置：");
+            foreach (var item in configurationSummary)
             {
-                Console.WriteLine($"  {variableName}: {string.Join(",", domains)}");
+                Console.WriteLine($"  {item.Key}: {item.Value}");
             }
+        }
+
+        private static List<DomainGroupInfo> BuildDomainGroups(IReadOnlyList<DnsUpdateProvider> dnsUpdateProviders)
+        {
+            var groups = new List<DomainGroupInfo>();
+            for (int rank = 0; rank < 3; rank++)
+            {
+                foreach (var dnsUpdateProvider in dnsUpdateProviders)
+                {
+                    var domains = dnsUpdateProvider.GetDomains(rank);
+                    if (domains.Length > 0)
+                    {
+                        groups.Add(new DomainGroupInfo { Rank = rank + 1, Provider = dnsUpdateProvider.ProviderName, Domains = domains.ToList() });
+                    }
+                }
+            }
+
+            return groups;
         }
 
         private static string MaskSecret(string? value)
@@ -405,6 +453,7 @@ namespace CloudflareFastCDN
         private static async Task<SelectionResult?> TryCreateInitialSelectionFromDomains(IReadOnlyList<DnsUpdateProvider> dnsUpdateProviders)
         {
             Console.WriteLine("首次启动先解析并测试已配置域名的当前IPv4地址");
+            DashboardState.SetPhase(DashboardPhase.InitialCheck, "解析已配置域名");
 
             var resolvedIps = new Dictionary<IPAddress, ResolvedDomainIp>();
             foreach (var dnsUpdateProvider in dnsUpdateProviders)
@@ -464,7 +513,9 @@ namespace CloudflareFastCDN
             var hasFailure = false;
             foreach (var resolvedIp in resolvedIps.Values)
             {
+                DashboardState.SetPhase(DashboardPhase.InitialCheck, $"HTTP检查 Top{resolvedIp.Rank} {resolvedIp.IP}");
                 var result = await httpPing.SinglePing(resolvedIp.IP, pauseAfterBackoff: false);
+                DashboardState.RecordCheck(resolvedIp.Rank, resolvedIp.IP.ToString(), result.success ? result.delay.TotalMilliseconds : null, "首次预检");
                 if (!result.success)
                 {
                     hasFailure = true;
@@ -483,28 +534,34 @@ namespace CloudflareFastCDN
             }
 
             Console.WriteLine($"首次域名预检的{assignedIps.Count}个IPv4地址均正常，跳过首次全量优选");
+            DashboardState.SetAssignedIps(assignedIps.Select(item => (item.Rank, item.IP.ToString(), item.BaselineDelay.TotalMilliseconds)));
             return new SelectionResult(assignedIps);
         }
 
-        private static async Task<bool> WaitForNextSelection(SelectionResult selection)
+        /// <summary>
+        /// 等待下一周期；返回需要执行全量优选的触发原因，返回 null 表示本周期无需全量优选。
+        /// </summary>
+        private static async Task<string?> WaitForNextSelection(SelectionResult selection)
         {
             var regularInterval = TimeSpan.FromMinutes(AppConfig.RunMinutes);
             if (regularInterval <= TimeSpan.Zero)
             {
                 Console.WriteLine("RUN_MINUTES 小于等于0，立即开始下一轮优选");
-                return true;
+                return "定时优选";
             }
+
+            var nextRunAt = TimestampedConsole.Now.Add(regularInterval);
+            DashboardState.SetWaiting(nextRunAt);
 
             if (!AppConfig.EnableSupplementalHttpCheck)
             {
                 Console.WriteLine(selection.AssignedIps.Count == 0
                     ? $"等待{AppConfig.RunMinutes}分钟；本轮没有已分配IP，到期后重新优选"
                     : $"等待{AppConfig.RunMinutes}分钟；到期后先复检{selection.AssignedIps.Count}个已分配IP");
-                await Task.Delay(regularInterval);
-                return !await ValidateAssignedIps(selection.AssignedIps);
+                var command = await RuntimeControl.WaitAsync(regularInterval);
+                return await HandleWaitFinished(selection, command);
             }
 
-            var nextRunAt = TimestampedConsole.Now.Add(regularInterval);
             if (selection.AssignedIps.Count == 0)
             {
                 Console.WriteLine($"等待{AppConfig.RunMinutes}分钟；本轮没有可用IP，将在{SupplementalHttpCheckInterval.TotalMinutes:0}分钟后触发重新优选");
@@ -519,52 +576,91 @@ namespace CloudflareFastCDN
                 var remaining = nextRunAt - TimestampedConsole.Now;
                 if (remaining <= TimeSpan.Zero)
                 {
-                    return !await ValidateAssignedIps(selection.AssignedIps);
+                    return await HandleWaitFinished(selection, ManualCommand.None);
                 }
 
                 var delay = remaining < SupplementalHttpCheckInterval
                     ? remaining
                     : SupplementalHttpCheckInterval;
-                await Task.Delay(delay);
+                var command = await RuntimeControl.WaitAsync(delay);
 
-                if (TimestampedConsole.Now >= nextRunAt)
+                if (command != ManualCommand.None || TimestampedConsole.Now >= nextRunAt)
                 {
-                    return !await ValidateAssignedIps(selection.AssignedIps);
+                    return await HandleWaitFinished(selection, command);
                 }
 
                 if (selection.AssignedIps.Count == 0)
                 {
                     Console.WriteLine("本轮没有可用于补充HTTP检查的IP，触发重新优选并重新计时");
-                    return true;
+                    return "无可用IP";
                 }
 
-                var healthy = await RunSupplementalHttpCheck(selection.AssignedIps[0].IP);
+                DashboardState.SetPhase(DashboardPhase.SupplementalCheck, $"补充HTTP检查 {selection.AssignedIps[0].IP}");
+                var healthy = await RunSupplementalHttpCheck(selection.AssignedIps[0]);
                 if (!healthy)
                 {
                     Console.WriteLine($"补充HTTP检查连续{SupplementalHttpCheckCount}次失败，立即开始重新优选并重新计时");
-                    return true;
+                    return "补充检查失败";
                 }
+
+                DashboardState.SetWaiting(nextRunAt);
             }
         }
 
-        private static async Task<bool> ValidateAssignedIps(IReadOnlyList<AssignedIp> assignedIps)
+        private static async Task<string?> HandleWaitFinished(SelectionResult selection, ManualCommand command)
         {
+            if (command == ManualCommand.FullSelection)
+            {
+                Console.WriteLine("按Web管理页面请求立即开始全量优选");
+                return "手动触发";
+            }
+
+            var manual = command == ManualCommand.Revalidate;
+            if (await ValidateAssignedIps(selection.AssignedIps, manual))
+            {
+                return null;
+            }
+
+            if (selection.AssignedIps.Count == 0)
+            {
+                return "无可用IP";
+            }
+
+            return manual ? "手动复检未通过" : "定时复检未通过";
+        }
+
+        private static async Task<bool> ValidateAssignedIps(IReadOnlyList<AssignedIp> assignedIps, bool manual)
+        {
+            RuntimeControl.ClearPendingRevalidation();
+            var reason = manual ? "收到手动复检请求" : "到达定时优选时间";
             if (assignedIps.Count == 0)
             {
-                Console.WriteLine("到达定时优选时间，但没有已分配IP，开始全量优选");
+                Console.WriteLine($"{reason}，但没有已分配IP，开始全量优选");
                 return false;
             }
 
-            Console.WriteLine($"到达定时优选时间，先复检{assignedIps.Count}个已分配IP；每个IP检测{HttpProbeCount}次，单次间隔{FinalProbeMinInterval.TotalSeconds:0}-{FinalProbeMaxInterval.TotalSeconds:0}秒，延迟达到动态阈值 max({AssignedDelayMinimumThreshold.TotalMilliseconds:0}ms, 基线×{AssignedDelayMaxMultiplier:0.#}) 则重新优选");
+            Console.WriteLine($"{reason}，先复检{assignedIps.Count}个已分配IP；每个IP检测{HttpProbeCount}次，单次间隔{FinalProbeMinInterval.TotalSeconds:0}-{FinalProbeMaxInterval.TotalSeconds:0}秒，延迟达到动态阈值 max({AssignedDelayMinimumThreshold.TotalMilliseconds:0}ms, 基线×{AssignedDelayMaxMultiplier:0.#}) 则重新优选");
             var httpPing = new Httping();
 
             for (int i = 0; i < assignedIps.Count; i++)
             {
                 var assignedIp = assignedIps[i];
+                DashboardState.SetPhase(DashboardPhase.Revalidating, $"复检 Top{assignedIp.Rank} {assignedIp.IP}（{i + 1}/{assignedIps.Count}）");
                 var result = await httpPing.Ping(assignedIp.IP, HttpProbeCount, FinalProbeMinInterval, FinalProbeMaxInterval);
                 var averageDelay = result.success > 0
                     ? TimeSpan.FromMilliseconds(result.totalDelay.TotalMilliseconds / result.success)
                     : TimeSpan.Zero;
+
+                var passed = result.success >= HttpProbeCount;
+                var updatedBaseline = passed && averageDelay > TimeSpan.Zero && averageDelay < assignedIp.BaselineDelay
+                    ? averageDelay
+                    : assignedIp.BaselineDelay;
+                DashboardState.RecordCheck(
+                    assignedIp.Rank,
+                    assignedIp.IP.ToString(),
+                    passed ? averageDelay.TotalMilliseconds : null,
+                    manual ? "手动复检" : "定时复检",
+                    updatedBaseline.TotalMilliseconds);
 
                 if (result.success < HttpProbeCount)
                 {
@@ -600,14 +696,16 @@ namespace CloudflareFastCDN
             return true;
         }
 
-        private static async Task<bool> RunSupplementalHttpCheck(IPAddress selectedIp)
+        private static async Task<bool> RunSupplementalHttpCheck(AssignedIp assignedIp)
         {
+            var selectedIp = assignedIp.IP;
             Console.WriteLine($"补充HTTP检查：{selectedIp}，最多{SupplementalHttpCheckCount}次，任意一次成功即通过");
 
             var httpPing = new Httping();
             for (int attempt = 1; attempt <= SupplementalHttpCheckCount; attempt++)
             {
                 var result = await httpPing.SinglePing(selectedIp);
+                DashboardState.RecordCheck(assignedIp.Rank, selectedIp.ToString(), result.success ? result.delay.TotalMilliseconds : null, "补充检查");
                 if (result.success)
                 {
                     Console.WriteLine($"补充HTTP检查 [{attempt}/{SupplementalHttpCheckCount}] 成功，HTTP延迟：{result.delay.TotalMilliseconds:0.00}ms");
@@ -658,7 +756,18 @@ namespace CloudflareFastCDN
             return shuffledData.Take(sampleSize).ToList();
         }
 
-        private static async Task<SelectionResult> SingleSelect(IReadOnlyList<DnsUpdateProvider> dnsUpdateProviders)
+        private static async Task<SelectionResult> SingleSelect(IReadOnlyList<DnsUpdateProvider> dnsUpdateProviders, string trigger)
+        {
+            RuntimeControl.ClearPending();
+            DashboardState.BeginRun(trigger, AppConfig.BandwidthPriority ? "带宽优先" : "延迟优先");
+            Console.WriteLine($"开始全量优选，触发原因：{trigger}");
+
+            var selection = await RunFullSelection(dnsUpdateProviders);
+            DashboardState.CompleteRun(selection.AssignedIps.Select(item => (item.Rank, item.IP.ToString(), item.BaselineDelay.TotalMilliseconds)));
+            return selection;
+        }
+
+        private static async Task<SelectionResult> RunFullSelection(IReadOnlyList<DnsUpdateProvider> dnsUpdateProviders)
         {
             var processor = new IPProcessor();
 
@@ -670,31 +779,38 @@ namespace CloudflareFastCDN
 
             IcmpPing task = new IcmpPing(ipAddresses, FirstRoundPingCount);
             Console.WriteLine($"开始第1轮检查：全量{FirstRoundPingCount}次Ping");
+            DashboardState.UpdateRun(run => run.Sampled = ipAddresses.Count, $"第1轮ICMP Ping（{ipAddresses.Count}个IP）");
             var firstRoundResults = await task.RunAsync();
             var topPings = firstRoundResults.Where(item => item.Sended == FirstRoundPingCount && item.Received == item.Sended).ToList();
             var secondRoundCandidateLimit = CalculateSecondRoundCandidateCount(ipAddresses.Count);
             var secondRoundPings = topPings.Take(secondRoundCandidateLimit).ToList();
 
             Console.WriteLine($"开始第2轮检查：第1轮前{secondRoundPings.Count}名（抽样{ipAddresses.Count}个，前{SecondRoundCandidateRatio:P0}上限{secondRoundCandidateLimit}个），{SecondRoundPingCount}次Ping，允许最多丢包{SecondRoundMaxPacketLoss}/{SecondRoundPingCount}");
+            DashboardState.UpdateRun(run => run.FirstRoundPassed = topPings.Count, $"第2轮ICMP Ping（{secondRoundPings.Count}个IP）");
             IcmpPing secondRoundPingTask = new IcmpPing(secondRoundPings.Select(item => item.IP).ToList(), SecondRoundPingCount);
             var secondRoundResults = await secondRoundPingTask.RunAsync();
             var secondRoundPassed = secondRoundResults
                 .Where(item => item.Sended == SecondRoundPingCount && item.Sended - item.Received <= SecondRoundMaxPacketLoss)
                 .ToList();
+            DashboardState.UpdateRun(run => run.SecondRoundPassed = secondRoundPassed.Count);
 
             var httpCandidates = secondRoundPassed.Take(FinalSecondRoundCandidateCount).ToList();
             var remainingSecondRoundCandidates = secondRoundPassed
                 .Skip(FinalSecondRoundCandidateCount)
                 .ToList();
 
+            var cachedCandidateIps = new HashSet<IPAddress>();
             var sampledSubnets = subnetCache.RandomSampleIPs(SubnetSampleCount);
             if (sampledSubnets.Any())
             {
                 Console.WriteLine($"开始子网缓存阶段：从{subnetCache.SubnetCount}个缓存/24子网中随机取出{sampledSubnets.Count}个IP进行TCP Ping验证");
+                DashboardState.UpdateRun(run => run.CachedSampled = sampledSubnets.Count, $"子网缓存TCP Ping（{sampledSubnets.Count}个IP）");
                 TcpPing subnetTcpPing = new TcpPing(sampledSubnets.Select(item => item.IP).ToList(), SubnetProbePingCount);
                 var subnetResults = await subnetTcpPing.RunAsync();
                 var subnetPassed = subnetResults.Where(result => result.Received > 0).ToList();
                 Console.WriteLine($"子网缓存阶段：{subnetPassed.Count}/{sampledSubnets.Count}个IP通过TCP Ping，加入最终候选");
+                DashboardState.UpdateRun(run => run.CachedPassed = subnetPassed.Count);
+                cachedCandidateIps.UnionWith(subnetPassed.Select(result => result.IP));
 
                 bool evicted = subnetCache.RecordTcpPingOutcomes(sampledSubnets, subnetPassed.Select(result => result.IP));
                 if (evicted || subnetPassed.Count < sampledSubnets.Count)
@@ -729,12 +845,15 @@ namespace CloudflareFastCDN
             }
 
             Console.WriteLine($"开始最终检查：{httpCandidates.Count}个候选IP进行HTTP验证，每个IP检测{HttpProbeCount}次，单次间隔{FinalProbeMinInterval.TotalSeconds:0}-{FinalProbeMaxInterval.TotalSeconds:0}秒，至少成功{HttpMinSuccessCount}次，当前模式：{(AppConfig.BandwidthPriority ? "带宽优先" : "延迟优先")}");
+            DashboardState.UpdateRun(run => run.HttpCandidates = httpCandidates.Count);
             int count = 0;
             List<PingData> topHttpList = new List<PingData>();
             var httpPing = new Httping();
             foreach (var ip in httpCandidates)
             {
                 count++;
+                DashboardState.SetSelectionDetail($"HTTP验证 {count}/{httpCandidates.Count} {ip.IP}");
+                var pingDelay = ip.Delay;
                 var pingResult = await httpPing.PingWithOutcome(ip.IP, HttpProbeCount, FinalProbeMinInterval, FinalProbeMaxInterval);
                 var averageDelay = pingResult.success > 0
                     ? TimeSpan.FromMilliseconds(pingResult.totalDelay.TotalMilliseconds / pingResult.success)
@@ -743,11 +862,28 @@ namespace CloudflareFastCDN
                 var errorMessage = pingResult.success >= HttpProbeCount ? string.Empty : $" 失败原因：{FormatError(pingResult.error)}";
                 var skipMessage = pingResult.skipNode ? "，已跳过此节点" : string.Empty;
                 Console.WriteLine($"最终结果 [{count}] {ip.IP} HTTP成功：{pingResult.success}/{HttpProbeCount} HTTP均延时：{averageDelay.TotalMilliseconds}ms{errorMessage}{skipMessage}");
-                if (!pingResult.skipNode && pingResult.success >= HttpMinSuccessCount)
+                var candidatePassed = !pingResult.skipNode && pingResult.success >= HttpMinSuccessCount;
+                if (candidatePassed)
                 {
                     ip.Delay = averageDelay;
                     topHttpList.Add(ip);
                 }
+
+                DashboardState.UpdateRun(run =>
+                {
+                    run.Candidates.Add(new CandidateResult
+                    {
+                        Ip = ip.IP.ToString(),
+                        Source = cachedCandidateIps.Contains(ip.IP) ? "子网缓存" : "ICMP",
+                        PingMs = pingDelay > TimeSpan.Zero ? Math.Round(pingDelay.TotalMilliseconds, 2) : null,
+                        HttpSuccess = pingResult.success,
+                        HttpTotal = HttpProbeCount,
+                        HttpAvgMs = pingResult.success > 0 ? Math.Round(averageDelay.TotalMilliseconds, 2) : null,
+                        Passed = candidatePassed,
+                        Error = pingResult.success >= HttpProbeCount ? null : FormatError(pingResult.error) + skipMessage
+                    });
+                    run.HttpPassed = topHttpList.Count;
+                });
 
                 if (count < httpCandidates.Count)
                 {
@@ -776,6 +912,7 @@ namespace CloudflareFastCDN
                     for (int speedIndex = 0; speedIndex < topHttpList.Count; speedIndex++)
                     {
                         var ip = topHttpList[speedIndex];
+                        DashboardState.SetSelectionDetail($"下载测速 {speedIndex + 1}/{topHttpList.Count} {ip.IP}");
                         var speedResult = await httpPing.SpeedTest(ip.IP);
                         if (!speedResult.success)
                         {
@@ -792,6 +929,15 @@ namespace CloudflareFastCDN
                         else
                         {
                             speedRankedList.Add((ip, speedResult.mbps, speedResult.bytesRead, speedResult.duration));
+                            var testedIp = ip.IP.ToString();
+                            DashboardState.UpdateRun(run =>
+                            {
+                                var candidate = run.Candidates.FirstOrDefault(item => item.Ip == testedIp);
+                                if (candidate != null)
+                                {
+                                    candidate.Mbps = Math.Round(speedResult.mbps, 2);
+                                }
+                            });
                             Console.WriteLine($"下载测速 [{speedRankedList.Count}] {ip.IP} 速度：{speedResult.mbps:0.00} Mbps 已下载：{speedResult.bytesRead / 1024d / 1024d:0.00} MB 用时：{speedResult.duration.TotalMilliseconds:0}ms");
                         }
 
@@ -863,10 +1009,12 @@ namespace CloudflareFastCDN
                         var rankedIp = topNData[rank];
                         foreach (var domain in domains)
                         {
+                            var updated = false;
                             try
                             {
                                 Console.WriteLine($"开始更新[{dnsUpdateProvider.ProviderName}]域名 {domain} {rankedIp.IP}（第{rank + 1}名）");
-                                var updated = await dnsUpdateProvider.Manager.AddOrUpdateARecord(domain, rankedIp.IP.ToString());
+                                DashboardState.SetSelectionDetail($"更新DNS {domain}");
+                                updated = await dnsUpdateProvider.Manager.AddOrUpdateARecord(domain, rankedIp.IP.ToString());
                                 if (updated)
                                 {
                                     Console.WriteLine($"已完成更新[{dnsUpdateProvider.ProviderName}]域名 {domain}");
@@ -881,6 +1029,15 @@ namespace CloudflareFastCDN
                             {
                                 Console.WriteLine(ex.ToString());
                             }
+
+                            DashboardState.UpdateRun(run => run.DnsUpdates.Add(new DnsUpdateResult
+                            {
+                                Provider = dnsUpdateProvider.ProviderName,
+                                Domain = domain,
+                                Rank = rank + 1,
+                                Ip = rankedIp.IP.ToString(),
+                                Success = updated
+                            }));
                         }
                     }
                 }
@@ -967,6 +1124,10 @@ namespace CloudflareFastCDN
             public string? UpdateIPList { get; init; }
             public string? EnableSupplementalHttpCheck { get; init; }
             public string? ForceInitialFullSelection { get; init; }
+            public string? WebPort { get; init; }
+            public string? WebHost { get; init; }
+            public string? WebUsername { get; init; }
+            public string? WebPassword { get; init; }
         }
 
         private static string FormatError(string? error)

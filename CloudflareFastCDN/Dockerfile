@@ -8,7 +8,7 @@ RUN dotnet restore "CloudflareFastCDN.csproj"
 COPY . .
 RUN dotnet publish "CloudflareFastCDN.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/runtime:9.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 
 WORKDIR /app
 
@@ -46,6 +46,8 @@ ARG RUN_MINUTES="60"
 ARG BANDWIDTH_PRIORITY="false"
 ARG UPDATE_IP_LIST="false"
 ARG ENABLE_SUPPLEMENTAL_HTTP_CHECK="false"
+ARG WEB_PORT="19401"
+ARG WEB_HOST="0.0.0.0"
 ARG TZ="Etc/UTC"
 
 ENV CLOUDFLARE_KEY=${CLOUDFLARE_KEY} \
@@ -73,7 +75,11 @@ ENV CLOUDFLARE_KEY=${CLOUDFLARE_KEY} \
     BANDWIDTH_PRIORITY=${BANDWIDTH_PRIORITY} \
     UPDATE_IP_LIST=${UPDATE_IP_LIST} \
     ENABLE_SUPPLEMENTAL_HTTP_CHECK=${ENABLE_SUPPLEMENTAL_HTTP_CHECK} \
+    WEB_PORT=${WEB_PORT} \
+    WEB_HOST=${WEB_HOST} \
     TZ=${TZ}
+
+EXPOSE 19401
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
 

@@ -38,6 +38,8 @@ docker run -d \
   -e CLOUDFLARE_DOMAINS=cdn-cf.example.com \
   -e HTTP_PROBE_URL=https://www.visa.cn/ \
   -e RUN_MINUTES=60 \
+  -e WEB_PASSWORD=your_web_password \
+  -p 19401:19401 \
   -v cloudflare-fast-cdn-data:/data \
   ghcr.io/aiqinxuancai/cloudflarefastcdn:latest
 ```
@@ -53,6 +55,19 @@ CloudflareFastCDN \
 ```
 
 > 参数优先级：环境变量 > 命令行参数。多个域名用英文逗号分隔。
+
+## Web 管理页面
+
+程序内置 Web 管理页面，默认监听 `19401` 端口，启动后访问 `http://<主机IP>:19401/`：
+
+- 查看当前运行阶段、下次复检倒计时、已分配 IP 及其基线/最近延迟
+- 折线图展示已分配 IP 的 HTTP 延迟趋势和每轮优选的 Top1 延迟，支持 6 小时 / 24 小时 / 7 天 / 30 天 / 全部时间范围
+- 查看正在进行或最近一次优选的候选 IP 验证结果、DNS 更新结果，以及历史优选记录
+- 实时查看运行日志，支持关键字筛选
+- **立即优选**：立即执行一次全量优选并更新 DNS；当前处于复检或预检时会排队，在其完成后执行
+- **立即复检**：提前结束等待，立即复检已分配 IP，不通过时自动进入全量优选
+
+Docker 环境默认监听 `0.0.0.0`，直接运行时默认仅监听 `127.0.0.1`。设置 `WEB_PASSWORD` 后访问需要 HTTP Basic 认证（用户名默认为 `admin`），**暴露到局域网或公网时务必设置密码**。延迟历史与优选记录保存在 `web_history.json`（Docker 下为 `/data/web_history.json`），重启后保留。
 
 ## 配置参数
 
@@ -86,6 +101,10 @@ CloudflareFastCDN \
 | `UPDATE_IP_LIST` | `false` | 启动时更新 Cloudflare 官方 IPv4 网段列表 |
 | `ENABLE_SUPPLEMENTAL_HTTP_CHECK` | `false` | 等待期间每 5 分钟补充验证当前最优 IP，连续 3 次失败则提前重新优选 |
 | `FORCE_INITIAL_FULL_SELECTION` | `false` | `true` 时跳过首次域名 IP 预检并强制执行全量优选 |
+| `WEB_PORT` | `19401` | Web 管理页面端口，`0` 表示关闭 |
+| `WEB_HOST` | Docker：`0.0.0.0`；直接运行：`127.0.0.1` | Web 管理页面监听地址 |
+| `WEB_USERNAME` | `admin` | Web 管理页面登录用户名 |
+| `WEB_PASSWORD` | 空 | Web 管理页面登录密码，留空则无需登录 |
 | `TZ` | `Etc/UTC` | Docker 环境下用于决定日志输出时区，例如 `Asia/Shanghai` |
 
 所有控制台日志都会携带标准时间戳，格式为 `yyyy-MM-dd HH:mm:ss.fff zzz`。

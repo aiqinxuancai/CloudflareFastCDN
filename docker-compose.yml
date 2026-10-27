@@ -7,6 +7,8 @@ services:
       - .env
     cap_add:
       - NET_RAW
+    ports:
+      - "${WEB_PORT:-19401}:${WEB_PORT:-19401}"
     volumes:
       - cloudflare-fast-cdn-data:/data
     logging:

@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CloudflareFastCDN 管理面板</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.10);
+  --wash: rgba(11, 11, 11, 0.04);
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --accent: #2a78d6;
+  --accent-ink: #ffffff;
+  --good: #0ca30c;
+  --good-text: #006300;
+  --critical: #d03b3b;
+  --warning: #fab219;
+  --font: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface-1: #1a1a19;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --wash: rgba(255, 255, 255, 0.05);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --accent: #3987e5;
+    --good-text: #0ca30c;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text-primary);
+  font: 14px/1.5 var(--font);
+}
+header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  padding: 12px 24px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+}
+header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+.conn { color: var(--text-muted); font-size: 12px; }
+.conn.bad { color: var(--critical); }
+.spacer { flex: 1; }
+button {
+  font: inherit;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: var(--wash); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+button:focus-visible, input:focus-visible, svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; padding: 4px 12px; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--wash); font-weight: 600; }
+main { max-width: 1400px; margin: 0 auto; padding: 20px 24px 40px; display: grid; gap: 16px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  min-width: 0;
+}
+.card h2 { margin: 0 0 12px; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.card h2 .sub { font-weight: 400; color: var(--text-muted); font-size: 12px; }
+.card h2 .tools { margin-left: auto; display: flex; gap: 8px; align-items: center; font-weight: 400; }
+.tile .label { color: var(--text-secondary); font-size: 13px; }
+.tile .value { font-size: 24px; font-weight: 600; margin-top: 4px; overflow-wrap: anywhere; }
+.tile .meta { color: var(--text-muted); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 16px; }
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.filters .label { color: var(--text-secondary); }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+th { color: var(--text-secondary); font-weight: 500; font-size: 12px; white-space: nowrap; }
+td.num, th.num { text-align: right; }
+.mono { font-family: var(--mono); font-size: 13px; }
+.muted { color: var(--text-muted); }
+.table-wrap { overflow-x: auto; }
+.table-wrap.scroll { max-height: 360px; overflow-y: auto; }
+.empty { color: var(--text-muted); padding: 16px 0; text-align: center; }
+.rank-key { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.rank-key i { display: inline-block; width: 14px; height: 2px; border-radius: 1px; }
+.status { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.status .icon { font-weight: 700; }
+.status.good .icon { color: var(--good); }
+.status.bad .icon { color: var(--critical); }
+.status.good { color: var(--good-text); }
+.phase-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
+  color: var(--text-secondary); font-size: 13px;
+}
+.phase-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+.phase-pill.busy .dot { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.3; } }
+.progress { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--text-secondary); font-size: 13px; margin-bottom: 8px; }
+.progress b { color: var(--text-primary); font-weight: 600; }
+.chart-box { position: relative; }
+.chart-box svg { display: block; width: 100%; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-bottom: 6px; color: var(--text-secondary); font-size: 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { display: inline-block; width: 14px; height: 2px; border-radius: 1px; }
+.legend .x { color: var(--critical); font-weight: 700; font-style: normal; }
+.tooltip {
+  position: absolute; pointer-events: none; z-index: 5;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  padding: 8px 10px; font-size: 12px; min-width: 180px; display: none;
+}
+.tooltip .t-title { color: var(--text-muted); margin-bottom: 4px; }
+.tooltip .t-row { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.tooltip .t-row i { display: inline-block; width: 12px; height: 2px; border-radius: 1px; flex: none; align-self: center; }
+.tooltip .t-row b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.tooltip .t-row span { color: var(--text-secondary); }
+.log-tools { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.log-tools input[type="search"] {
+  font: inherit; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surface-1); color: var(--text-primary); width: 220px;
+}
+.log-view {
+  height: 480px; overflow: auto; background: var(--page); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 0; font-family: var(--mono); font-size: 12px; line-height: 1.6;
+}
+.log-line { padding: 0 12px; white-space: pre-wrap; word-break: break-all; border-left: 3px solid transparent; }
+.log-line .lt { color: var(--text-muted); margin-right: 8px; }
+.log-line.bad { border-left-color: var(--critical); }
+.log-line.good { border-left-color: var(--good); }
+.config-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 4px 24px; font-size: 13px; }
+.config-list div { display: flex; gap: 8px; min-width: 0; }
+.config-list .k { color: var(--text-secondary); flex: none; }
+.config-list .v { font-family: var(--mono); overflow-wrap: anywhere; }
+.toast {
+  position: fixed; right: 24px; bottom: 24px; z-index: 20; max-width: 360px;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15); padding: 10px 14px; display: none;
+}
+.toast.show { display: block; }
+.toast .icon { font-weight: 700; margin-right: 6px; }
+.toast.good .icon { color: var(--good); }
+.toast.bad .icon { color: var(--critical); }
+details summary { cursor: pointer; color: var(--text-secondary); }
+@media (max-width: 640px) {
+  header, main { padding-left: 12px; padding-right: 12px; }
+  .grid-2 { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>CloudflareFastCDN</h1>
+  <span id="phasePill" class="phase-pill"><span class="dot"></span><span id="phaseText">连接中…</span></span>
+  <span id="conn" class="conn"></span>
+  <span class="spacer"></span>
+  <button id="btnRevalidate" type="button" title="提前结束等待，立即复检已分配的IP；复检不通过时自动进入全量优选">立即复检</button>
+  <button id="btnSelect" type="button" class="primary" title="立即执行一次全量优选并更新DNS记录">立即优选</button>
+</header>
+
+<main>
+  <section class="tiles" aria-label="概览">
+    <div class="card tile">
+      <div class="label">当前状态</div>
+      <div class="value" id="tilePhase">—</div>
+      <div class="meta" id="tilePhaseMeta">&nbsp;</div>
+    </div>
+    <div class="card tile">
+      <div class="label">下次检查</div>
+      <div class="value" id="tileNext">—</div>
+      <div class="meta" id="tileNextMeta">&nbsp;</div>
+    </div>
+    <div class="card tile">
+      <div class="label">Top1 当前延迟</div>
+      <div class="value" id="tileTop1">—</div>
+      <div class="meta" id="tileTop1Meta">&nbsp;</div>
+    </div>
+    <div class="card tile">
+      <div class="label">已完成优选</div>
+      <div class="value" id="tileRuns">—</div>
+      <div class="meta" id="tileRunsMeta">&nbsp;</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>已分配 IP <span class="sub">DNS 记录当前指向的优选结果</span></h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>排名</th><th>IP</th><th class="num">基线延迟</th><th class="num">最近延迟</th><th>最近检查</th><th>状态</th><th>域名</th></tr></thead>
+        <tbody id="assignedBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="filters" role="group" aria-label="时间范围">
+    <span class="label">时间范围</span>
+    <span class="seg" id="rangeSeg">
+      <button type="button" data-range="21600000">6 小时</button>
+      <button type="button" data-range="86400000" aria-pressed="true">24 小时</button>
+      <button type="button" data-range="604800000">7 天</button>
+      <button type="button" data-range="2592000000">30 天</button>
+      <button type="button" data-range="0">全部</button>
+    </span>
+  </div>
+
+  <div class="grid-2">
+    <section class="card">
+      <h2>已分配 IP 的 HTTP 延迟 <span class="sub">ms</span>
+        <span class="tools"><button type="button" id="btnLatencyTable" aria-pressed="false">表格</button></span>
+      </h2>
+      <div id="latencyChart" class="chart-box"></div>
+      <div id="latencyTable" class="table-wrap scroll" hidden></div>
+    </section>
+    <section class="card">
+      <h2>每轮优选的 Top1 HTTP 延迟 <span class="sub">ms</span></h2>
+      <div id="runChart" class="chart-box"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2 id="runTitle">最近一次优选</h2>
+    <div class="progress" id="runProgress"></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>IP</th><th>来源</th><th class="num">Ping</th><th class="num">HTTP 成功</th><th class="num">HTTP 均延迟</th><th class="num">下载速度</th><th>结果</th></tr></thead>
+        <tbody id="candidateBody"></tbody>
+      </table>
+    </div>
+    <div id="dnsUpdates" class="table-wrap" style="margin-top: 12px"></div>
+  </section>
+
+  <section class="card">
+    <h2>优选历史 <span class="sub">最近 50 次</span></h2>
+    <div class="table-wrap scroll">
+      <table>
+        <thead><tr><th>完成时间</th><th>触发原因</th><th>模式</th><th class="num">耗时</th><th class="num">抽样</th><th class="num">第1轮</th><th class="num">第2轮</th><th class="num">HTTP 通过</th><th>结果</th></tr></thead>
+        <tbody id="runsBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>运行日志
+      <span class="tools log-tools">
+        <input type="search" id="logFilter" placeholder="筛选日志关键字" aria-label="筛选日志">
+        <label><input type="checkbox" id="logAutoScroll" checked> 自动滚动</label>
+        <button type="button" id="btnLogClear">清空显示</button>
+      </span>
+    </h2>
+    <div id="logView" class="log-view" role="log" aria-live="off"></div>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>运行配置</summary>
+      <div class="config-list" id="configList" style="margin-top: 12px"></div>
+    </details>
+  </section>
+</main>
+
+<div id="toast" class="toast" role="status"><span class="icon"></span><span class="msg"></span></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const PHASES = {
+    'starting': { label: '启动中', busy: true },
+    'initial-check': { label: '首次预检', busy: true },
+    'selecting': { label: '全量优选中', busy: true },
+    'revalidating': { label: '复检中', busy: true },
+    'waiting': { label: '等待中', busy: false },
+    'supplemental-check': { label: '补充检查', busy: true }
+  };
+  const SERIES = [
+    { rank: 1, name: 'Top1', color: 'var(--series-1)' },
+    { rank: 2, name: 'Top2', color: 'var(--series-2)' },
+    { rank: 3, name: 'Top3', color: 'var(--series-3)' }
+  ];
+  const MAX_LOG_LINES = 3000;
+  const BAD_LOG = /失败|异常|错误|无法|Exception|Error/i;
+  const GOOD_LOG = /已完成更新|均正常|本轮实际分配|已启动/;
+
+  const state = {
+    status: null,
+    history: null,
+    historyVersion: -1,
+    range: 86400000,
+    clockSkew: 0,
+    logSeq: 0,
+    showLatencyTable: false
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function el(tag, props, ...children) {
+    const node = document.createElement(tag);
+    if (props) {
+      for (const [key, value] of Object.entries(props)) {
+        if (value == null) continue;
+        if (key === 'class') node.className = value;
+        else if (key === 'text') node.textContent = value;
+        else if (key === 'style') node.style.cssText = value;
+        else node.setAttribute(key, value);
+      }
+    }
+    for (const child of children) {
+      if (child == null) continue;
+      node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+    return node;
+  }
+
+  function svgEl(tag, attrs) {
+    const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [key, value] of Object.entries(attrs || {})) node.setAttribute(key, value);
+    return node;
+  }
+
+  // ---------- 格式化 ----------
+  const pad = (n) => String(n).padStart(2, '0');
+  function fmtDateTime(value) {
+    const d = new Date(value);
+    return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+  function fmtMs(value) {
+    if (value == null) return '—';
+    return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ms`;
+  }
+  function fmtDuration(ms) {
+    if (ms == null || !isFinite(ms)) return '—';
+    const total = Math.max(0, Math.round(ms / 1000));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    if (h > 0) return `${h}小时${m}分`;
+    if (m > 0) return `${m}分${pad(s)}秒`;
+    return `${s}秒`;
+  }
+  function fmtCountdown(ms) {
+    const total = Math.max(0, Math.round(ms / 1000));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+  }
+  function fmtAgo(value) {
+    if (!value) return '—';
+    const diff = serverNow() - new Date(value).getTime();
+    if (diff < 60000) return '刚刚';
+    return `${fmtDuration(diff)}前`;
+  }
+  const serverNow = () => Date.now() + state.clockSkew;
+
+  function statusBadge(ok, goodText, badText) {
+    return el('span', { class: `status ${ok ? 'good' : 'bad'}` },
+      el('span', { class: 'icon', 'aria-hidden': 'true', text: ok ? '✓' : '✕' }),
+      ok ? goodText : badText);
+  }
+  function rankKey(rank) {
+    const series = SERIES.find((item) => item.rank === rank);
+    return el('span', { class: 'rank-key' },
+      el('i', { style: `background:${series ? series.color : 'var(--text-muted)'}` }),
+      `Top${rank}`);
+  }
+
+  // ---------- 网络 ----------
+  async function api(path, options) {
+    // 以 http://user:pass@host/ 方式打开页面时，相对地址会继承凭据导致 fetch 报错，因此改用不含凭据的 origin
+    const response = await fetch(new URL(path, location.origin), Object.assign({ cache: 'no-store', credentials: 'same-origin' }, options));
+    if (response.status === 401) {
+      location.reload();
+      throw new Error('未授权');
+    }
+    return response;
+  }
+
+  function setConnection(ok) {
+    const conn = $('conn');
+    conn.textContent = ok ? '' : '连接中断，正在重试…';
+    conn.classList.toggle('bad', !ok);
+  }
+
+  async function refreshStatus() {
+    const response = await api('/api/status');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const status = await response.json();
+    state.clockSkew = new Date(status.serverTime).getTime() - Date.now();
+    state.status = status;
+    renderStatus();
+    if (status.historyVersion !== state.historyVersion) {
+      state.historyVersion = status.historyVersion;
+      await refreshHistory();
+    } else {
+      renderRunDetail();
+    }
+  }
+
+  async function refreshHistory() {
+    const response = await api('/api/history');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.history = await response.json();
+    renderHistory();
+  }
+
+  async function refreshLogs() {
+    const limit = state.logSeq === 0 ? 1000 : 3000;
+    const response = await api(`/api/logs?after=${state.logSeq}&limit=${limit}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const page = await response.json();
+    if (page.reset) clearLogView();
+    appendLogs(page.lines);
+    state.logSeq = page.lastSeq;
+  }
+
+  async function poll(fn, interval) {
+    for (;;) {
+      try {
+        await fn();
+        setConnection(true);
+      } catch (error) {
+        setConnection(false);
+      }
+      await sleep(interval);
+    }
+  }
+
+  // ---------- 操作 ----------
+  let toastTimer = 0;
+  function showToast(ok, message) {
+    const toast = $('toast');
+    toast.className = `toast show ${ok ? 'good' : 'bad'}`;
+    toast.querySelector('.icon').textContent = ok ? '✓' : '✕';
+    toast.querySelector('.msg').textContent = message;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 4000);
+  }
+
+  async function runAction(path, confirmText) {
+    if (confirmText && !window.confirm(confirmText)) return;
+    try {
+      const response = await api(path, { method: 'POST', headers: { 'X-CFCDN-Action': '1' } });
+      const result = await response.json().catch(() => ({ accepted: false, message: `HTTP ${response.status}` }));
+      showToast(result.accepted, result.message);
+    } catch (error) {
+      showToast(false, `请求失败：${error.message}`);
+    }
+    refreshStatus().catch(() => {});
+  }
+
+  $('btnSelect').addEventListener('click', () =>
+    runAction('/api/actions/select', '立即执行一次全量优选？完成后会按结果更新 DNS 记录。'));
+  $('btnRevalidate').addEventListener('click', () => runAction('/api/actions/revalidate'));
+
+  // ---------- 状态渲染 ----------
+  function renderStatus() {
+    const status = state.status;
+    if (!status) return;
+    const phase = PHASES[status.phase] || { label: status.phase, busy: false };
+
+    const pill = $('phasePill');
+    pill.classList.toggle('busy', phase.busy);
+    $('phaseText').textContent = status.phaseDetail ? `${phase.label} · ${status.phaseDetail}` : phase.label;
+
+    $('btnSelect').disabled = status.phase === 'selecting' || status.pendingAction === 'select';
+    $('btnRevalidate').disabled = status.phase === 'selecting' || status.phase === 'revalidating' || !!status.pendingAction;
+    $('btnSelect').textContent = status.pendingAction === 'select' ? '优选已排队' : '立即优选';
+    $('btnRevalidate').textContent = status.pendingAction === 'revalidate' ? '复检已排队' : '立即复检';
+
+    const top1 = status.assignedIps.find((item) => item.rank === 1) || status.assignedIps[0];
+    $('tileTop1').textContent = top1 ? fmtMs(top1.lastDelayMs ?? top1.baselineMs) : '—';
+    $('tileTop1Meta').textContent = top1 ? `${top1.ip} · 基线 ${fmtMs(top1.baselineMs)}` : '暂无已分配 IP';
+
+    $('tileRuns').textContent = String(status.completedRuns);
+    $('tileRunsMeta').textContent = status.lastRunFinishedAt
+      ? `上次完成于 ${fmtAgo(status.lastRunFinishedAt)}`
+      : `服务已运行 ${fmtDuration(serverNow() - new Date(status.startedAt).getTime())}`;
+
+    renderAssigned(status);
+    renderConfig(status.config);
+    tick();
+  }
+
+  function tick() {
+    const status = state.status;
+    if (!status) return;
+    const phase = PHASES[status.phase] || { label: status.phase };
+    $('tilePhase').textContent = phase.label;
+    const elapsed = fmtDuration(serverNow() - new Date(status.phaseStartedAt).getTime());
+    $('tilePhaseMeta').textContent = status.phaseDetail ? `${status.phaseDetail} · 已持续 ${elapsed}` : `已持续 ${elapsed}`;
+
+    if (status.nextCheckAt) {
+      const remaining = new Date(status.nextCheckAt).getTime() - serverNow();
+      $('tileNext').textContent = fmtCountdown(remaining);
+      $('tileNextMeta').textContent = `${fmtDateTime(status.nextCheckAt)} 复检已分配 IP`;
+    } else {
+      $('tileNext').textContent = '—';
+      $('tileNextMeta').textContent = phase.busy ? '当前任务完成后开始计时' : ' ';
+    }
+  }
+
+  function renderAssigned(status) {
+    const body = $('assignedBody');
+    body.replaceChildren();
+    if (status.assignedIps.length === 0) {
+      body.append(el('tr', null, el('td', { colspan: '7', class: 'empty', text: '暂无已分配 IP' })));
+      return;
+    }
+    for (const item of status.assignedIps) {
+      const domains = status.domainGroups
+        .filter((group) => group.rank === item.rank)
+        .map((group) => `${group.provider}: ${group.domains.join(', ')}`)
+        .join('；');
+      body.append(el('tr', null,
+        el('td', null, rankKey(item.rank)),
+        el('td', { class: 'mono', text: item.ip }),
+        el('td', { class: 'num', text: fmtMs(item.baselineMs) }),
+        el('td', { class: 'num', text: fmtMs(item.lastDelayMs) }),
+        el('td', { class: 'muted', text: item.lastCheckedAt ? fmtDateTime(item.lastCheckedAt) : '—' }),
+        el('td', null, statusBadge(item.lastCheckOk, '正常', '检查失败')),
+        el('td', { class: 'muted', text: domains || '—' })));
+    }
+  }
+
+  let configRendered = false;
+  function renderConfig(config) {
+    if (configRendered || !config) return;
+    configRendered = true;
+    const list = $('configList');
+    for (const item of config) {
+      list.append(el('div', null, el('span', { class: 'k', text: item.key }), el('span', { class: 'v', text: item.value })));
+    }
+  }
+
+  // ---------- 历史渲染 ----------
+  function rangeStart() {
+    return state.range > 0 ? serverNow() - state.range : null;
+  }
+
+  function renderHistory() {
+    renderLatency();
+    renderRunChart();
+    renderRunsTable();
+    renderRunDetail();
+  }
+
+  function latencyInRange() {
+    const history = state.history;
+    if (!history) return [];
+    const start = rangeStart();
+    return history.latency
+      .map((sample) => Object.assign({ t: new Date(sample.time).getTime() }, sample))
+      .filter((sample) => start == null || sample.t >= start);
+  }
+
+  function renderLatency() {
+    const samples = latencyInRange();
+    $('latencyChart').hidden = state.showLatencyTable;
+    $('latencyTable').hidden = !state.showLatencyTable;
+    if (state.showLatencyTable) {
+      renderLatencyTable(samples);
+      return;
+    }
+
+    const series = SERIES.map((item) => ({
+      name: item.name,
+      color: item.color,
+      points: samples.filter((sample) => sample.rank === item.rank)
+        .map((sample) => ({ t: sample.t, v: sample.delayMs ?? null, sample }))
+    })).filter((item) => item.points.length > 0);
+
+    const start = rangeStart();
+    const tMax = serverNow();
+    const tMin = start ?? (samples.length ? Math.min(...samples.map((s) => s.t)) : tMax - 3600000);
+    const tolerance = Math.max(5 * 60000, (tMax - tMin) * 0.01);
+
+    lineChart($('latencyChart'), {
+      series,
+      tMin,
+      tMax,
+      emptyText: '所选时间范围内暂无延迟数据',
+      tooltip(t) {
+        const rows = [];
+        for (const item of series) {
+          let nearest = null;
+          for (const point of item.points) {
+            const distance = Math.abs(point.t - t);
+            if (distance <= tolerance && (!nearest || distance < Math.abs(nearest.t - t))) nearest = point;
+          }
+          if (nearest) {
+            rows.push({
+              color: item.color,
+              value: nearest.v == null ? '失败' : fmtMs(nearest.v),
+              label: `${item.name} · ${nearest.sample.ip} · ${nearest.sample.source}`
+            });
+          }
+        }
+        return rows;
+      }
+    });
+  }
+
+  function renderLatencyTable(samples) {
+    const wrap = $('latencyTable');
+    const rows = samples.slice(-300).reverse();
+    const table = el('table', null,
+      el('thead', null, el('tr', null,
+        el('th', { text: '时间' }), el('th', { text: '排名' }), el('th', { text: 'IP' }),
+        el('th', { class: 'num', text: 'HTTP 延迟' }), el('th', { text: '来源' }))),
+      el('tbody', null, ...rows.map((sample) => el('tr', null,
+        el('td', { class: 'muted', text: fmtDateTime(sample.t) }),
+        el('td', null, rankKey(sample.rank)),
+        el('td', { class: 'mono', text: sample.ip }),
+        el('td', { class: 'num' }, sample.delayMs == null ? statusBadge(false, '', '失败') : fmtMs(sample.delayMs)),
+        el('td', { class: 'muted', text: sample.source })))));
+    wrap.replaceChildren(rows.length ? table : el('div', { class: 'empty', text: '所选时间范围内暂无延迟数据' }));
+  }
+
+  function runsInRange() {
+    const history = state.history;
+    if (!history) return [];
+    const start = rangeStart();
+    return history.runs
+      .filter((run) => run.finishedAt)
+      .map((run) => Object.assign({ t: new Date(run.finishedAt).getTime() }, run))
+      .filter((run) => start == null || run.t >= start);
+  }
+
+  function renderRunChart() {
+    const runs = runsInRange();
+    const points = runs.map((run) => {
+      const top1 = run.assigned.find((item) => item.rank === 1) || run.assigned[0];
+      return { t: run.t, v: top1 ? top1.delayMs : null, run, top1 };
+    });
+    const start = rangeStart();
+    const tMax = serverNow();
+    const tMin = start ?? (points.length ? Math.min(...points.map((p) => p.t)) : tMax - 3600000);
+
+    lineChart($('runChart'), {
+      series: points.length ? [{ name: 'Top1', color: 'var(--series-1)', points }] : [],
+      tMin,
+      tMax,
+      showLegend: false,
+      showDots: true,
+      emptyText: '所选时间范围内暂无完成的优选',
+      tooltip(t) {
+        let nearest = null;
+        for (const point of points) {
+          if (!nearest || Math.abs(point.t - t) < Math.abs(nearest.t - t)) nearest = point;
+        }
+        if (!nearest) return [];
+        const run = nearest.run;
+        return [
+          {
+            color: 'var(--series-1)',
+            value: nearest.top1 ? fmtMs(nearest.top1.delayMs) : '无结果',
+            label: nearest.top1 ? `Top1 · ${nearest.top1.ip}` : run.note || ''
+          },
+          { value: run.trigger, label: '触发原因' },
+          { value: `${run.httpPassed}/${run.httpCandidates}`, label: 'HTTP 验证通过' }
+        ];
+      },
+      snapTimes: points.map((p) => p.t)
+    });
+  }
+
+  function renderRunsTable() {
+    const body = $('runsBody');
+    body.replaceChildren();
+    const runs = (state.history ? state.history.runs : []).slice(-50).reverse();
+    if (runs.length === 0) {
+      body.append(el('tr', null, el('td', { colspan: '9', class: 'empty', text: '暂无优选记录' })));
+      return;
+    }
+    for (const run of runs) {
+      const ok = run.assigned.length > 0;
+      const result = ok
+        ? run.assigned.map((item) => `Top${item.rank} ${item.ip} (${fmtMs(item.delayMs)})`).join('，')
+        : run.note || '无结果';
+      const duration = run.finishedAt ? new Date(run.finishedAt) - new Date(run.startedAt) : null;
+      body.append(el('tr', null,
+        el('td', { class: 'muted', text: run.finishedAt ? fmtDateTime(run.finishedAt) : '进行中' }),
+        el('td', { text: run.trigger }),
+        el('td', { class: 'muted', text: run.mode }),
+        el('td', { class: 'num', text: fmtDuration(duration) }),
+        el('td', { class: 'num', text: run.sampled }),
+        el('td', { class: 'num', text: run.firstRoundPassed }),
+        el('td', { class: 'num', text: run.secondRoundPassed }),
+        el('td', { class: 'num', text: `${run.httpPassed}/${run.httpCandidates}` }),
+        el('td', null, statusBadge(ok, '', ''), ' ', el('span', { class: ok ? 'mono' : 'muted', text: result }))));
+    }
+  }
+
+  function renderRunDetail() {
+    const status = state.status;
+    const running = status && status.currentRun;
+    const runs = state.history ? state.history.runs : [];
+    const run = running || runs[runs.length - 1];
+
+    $('runTitle').textContent = running ? '正在进行的优选' : '最近一次优选';
+    const progress = $('runProgress');
+    progress.replaceChildren();
+    const body = $('candidateBody');
+    body.replaceChildren();
+    const dns = $('dnsUpdates');
+    dns.replaceChildren();
+
+    if (!run) {
+      body.append(el('tr', null, el('td', { colspan: '8', class: 'empty', text: '暂无优选记录' })));
+      return;
+    }
+
+    const stat = (label, value) => el('span', null, `${label} `, el('b', { text: String(value) }));
+    progress.append(
+      stat('开始', fmtDateTime(run.startedAt)),
+      stat('触发', run.trigger),
+      stat('模式', run.mode),
+      stat('抽样', run.sampled),
+      stat('第1轮通过', run.firstRoundPassed),
+      stat('第2轮通过', run.secondRoundPassed),
+      stat('子网缓存', `${run.cachedPassed}/${run.cachedSampled}`),
+      stat('HTTP 通过', `${run.httpPassed}/${run.httpCandidates}`));
+    if (run.finishedAt) {
+      progress.append(stat('耗时', fmtDuration(new Date(run.finishedAt) - new Date(run.startedAt))));
+    } else if (status.phaseDetail) {
+      progress.append(stat('当前', status.phaseDetail));
+    }
+
+    if (run.candidates.length === 0) {
+      body.append(el('tr', null, el('td', { colspan: '8', class: 'empty', text: running ? '正在筛选候选 IP…' : '没有候选 IP 进入 HTTP 验证' })));
+    }
+    run.candidates.forEach((candidate, index) => {
+      body.append(el('tr', null,
+        el('td', { class: 'muted', text: index + 1 }),
+        el('td', { class: 'mono', text: candidate.ip }),
+        el('td', { class: 'muted', text: candidate.source }),
+        el('td', { class: 'num', text: fmtMs(candidate.pingMs) }),
+        el('td', { class: 'num', text: `${candidate.httpSuccess}/${candidate.httpTotal}` }),
+        el('td', { class: 'num', text: fmtMs(candidate.httpAvgMs) }),
+        el('td', { class: 'num', text: candidate.mbps == null ? '—' : `${candidate.mbps.toFixed(2)} Mbps` }),
+        el('td', null, statusBadge(candidate.passed, '通过', '未通过'),
+          candidate.error ? el('span', { class: 'muted', text: ` ${candidate.error}` }) : null)));
+    });
+
+    if (run.dnsUpdates.length > 0) {
+      dns.append(el('table', null,
+        el('thead', null, el('tr', null,
+          el('th', { text: 'DNS 服务商' }), el('th', { text: '域名' }), el('th', { text: '排名' }),
+          el('th', { text: 'IP' }), el('th', { text: '更新结果' }))),
+        el('tbody', null, ...run.dnsUpdates.map((update) => el('tr', null,
+          el('td', { text: update.provider }),
+          el('td', { class: 'mono', text: update.domain }),
+          el('td', null, rankKey(update.rank)),
+          el('td', { class: 'mono', text: update.ip }),
+          el('td', null, statusBadge(update.success, '成功', '失败')))))));
+    }
+  }
+
+  // ---------- 折线图 ----------
+  const TIME_STEPS = [60e3, 5 * 60e3, 10 * 60e3, 15 * 60e3, 30 * 60e3, 3600e3, 2 * 3600e3, 3 * 3600e3,
+    6 * 3600e3, 12 * 3600e3, 86400e3, 2 * 86400e3, 7 * 86400e3, 14 * 86400e3];
+
+  function niceStep(max, count) {
+    const raw = max / count;
+    const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
+    for (const factor of [1, 2, 2.5, 5, 10]) {
+      if (factor * magnitude >= raw) return factor * magnitude;
+    }
+    return 10 * magnitude;
+  }
+
+  function fmtTick(t, step) {
+    const d = new Date(t);
+    if (step >= 86400e3) return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    if (d.getHours() === 0 && d.getMinutes() === 0) return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function lineChart(container, cfg) {
+    const width = Math.max(320, container.clientWidth || 600);
+    const height = 260;
+    const margin = { top: 12, right: 96, bottom: 28, left: 48 };
+    const plotW = width - margin.left - margin.right;
+    const plotH = height - margin.top - margin.bottom;
+    const showLegend = cfg.showLegend !== false;
+
+    container.replaceChildren();
+    if (showLegend && cfg.series.length > 0) {
+      const legend = el('div', { class: 'legend' });
+      for (const item of cfg.series) {
+        legend.append(el('span', null, el('i', { style: `background:${item.color}` }), item.name));
+      }
+      if (cfg.series.some((item) => item.points.some((p) => p.v == null))) {
+        legend.append(el('span', null, el('em', { class: 'x', 'aria-hidden': 'true', text: '✕' }), '检查失败'));
+      }
+      container.append(legend);
+    }
+
+    const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, height, role: 'img', tabindex: '0' });
+    container.append(svg);
+    const tooltip = el('div', { class: 'tooltip' });
+    container.append(tooltip);
+
+    const allPoints = cfg.series.flatMap((item) => item.points);
+    const values = allPoints.filter((p) => p.v != null).map((p) => p.v);
+    const tMin = cfg.tMin;
+    const tMax = Math.max(cfg.tMax, tMin + 60e3);
+    const yStep = niceStep(values.length ? Math.max(...values) * 1.1 : 100, 4);
+    const yMax = Math.max(yStep, Math.ceil((values.length ? Math.max(...values) * 1.05 : 100) / yStep) * yStep);
+
+    const x = (t) => margin.left + ((t - tMin) / (tMax - tMin)) * plotW;
+    const y = (v) => margin.top + plotH - (v / yMax) * plotH;
+
+    // 网格与纵轴
+    for (let v = 0; v <= yMax + 1e-9; v += yStep) {
+      svg.append(svgEl('line', {
+        x1: margin.left, x2: margin.left + plotW, y1: y(v), y2: y(v),
+        stroke: v === 0 ? 'var(--axis)' : 'var(--grid)', 'stroke-width': 1, 'shape-rendering': 'crispEdges'
+      }));
+      const label = svgEl('text', {
+        x: margin.left - 8, y: y(v), 'text-anchor': 'end', 'dominant-baseline': 'middle',
+        fill: 'var(--text-muted)', 'font-size': 11, style: 'font-variant-numeric: tabular-nums'
+      });
+      label.textContent = v >= 1000 ? `${(v / 1000).toFixed(1)}K` : String(Math.round(v * 10) / 10);
+      svg.append(label);
+    }
+
+    // 横轴刻度
+    const maxTicks = Math.max(2, Math.floor(plotW / 90));
+    const tStep = TIME_STEPS.find((step) => (tMax - tMin) / step <= maxTicks) || TIME_STEPS[TIME_STEPS.length - 1];
+    const offset = new Date().getTimezoneOffset() * 60e3;
+    let tick = Math.ceil((tMin - offset) / tStep) * tStep + offset;
+    for (; tick <= tMax; tick += tStep) {
+      const label = svgEl('text', {
+        x: x(tick), y: height - 8, 'text-anchor': 'middle', fill: 'var(--text-muted)', 'font-size': 11
+      });
+      label.textContent = fmtTick(tick, tStep);
+      svg.append(label);
+    }
+
+    if (allPoints.length === 0) {
+      const text = svgEl('text', {
+        x: margin.left + plotW / 2, y: margin.top + plotH / 2, 'text-anchor': 'middle',
+        fill: 'var(--text-muted)', 'font-size': 13
+      });
+      text.textContent = cfg.emptyText;
+      svg.append(text);
+      return;
+    }
+
+    // 折线，检查失败处断开
+    const endLabels = [];
+    for (const item of cfg.series) {
+      const points = item.points.slice().sort((a, b) => a.t - b.t);
+      let path = '';
+      let segmentLength = 0;
+      const isolated = [];
+      points.forEach((point, index) => {
+        if (point.v == null) {
+          if (segmentLength === 1) isolated.push(points[index - 1]);
+          segmentLength = 0;
+          return;
+        }
+        path += `${segmentLength === 0 ? 'M' : 'L'}${x(point.t).toFixed(1)},${y(point.v).toFixed(1)}`;
+        segmentLength++;
+      });
+      if (segmentLength === 1) isolated.push(points.filter((p) => p.v != null).pop());
+
+      if (path) {
+        svg.append(svgEl('path', {
+          d: path, fill: 'none', stroke: item.color, 'stroke-width': 2,
+          'stroke-linejoin': 'round', 'stroke-linecap': 'round'
+        }));
+      }
+
+      const valid = points.filter((p) => p.v != null);
+      const dots = cfg.showDots && valid.length <= 80 ? valid : isolated;
+      for (const point of dots) {
+        svg.append(svgEl('circle', {
+          cx: x(point.t), cy: y(point.v), r: 4, fill: item.color, stroke: 'var(--surface-1)', 'stroke-width': 2
+        }));
+      }
+
+      for (const point of points.filter((p) => p.v == null)) {
+        const cross = svgEl('text', {
+          x: x(point.t), y: margin.top + plotH - 6, 'text-anchor': 'middle',
+          fill: 'var(--critical)', 'font-size': 11, 'font-weight': 700
+        });
+        cross.textContent = '✕';
+        svg.append(cross);
+      }
+
+      const last = valid[valid.length - 1];
+      if (last) {
+        svg.append(svgEl('circle', {
+          cx: x(last.t), cy: y(last.v), r: 4, fill: item.color, stroke: 'var(--surface-1)', 'stroke-width': 2
+        }));
+        endLabels.push({ x: x(last.t), y: y(last.v), text: `${item.name} ${fmtMs(last.v)}` });
+      }
+    }
+
+    // 末端直接标注：相互重叠时只保留靠前的系列，其余由图例和提示框承担
+    const placed = [];
+    for (const label of endLabels) {
+      if (placed.some((other) => Math.abs(other.y - label.y) < 14)) continue;
+      placed.push(label);
+      const text = svgEl('text', {
+        x: label.x + 8, y: label.y, 'dominant-baseline': 'middle',
+        fill: 'var(--text-secondary)', 'font-size': 11, style: 'font-variant-numeric: tabular-nums'
+      });
+      text.textContent = label.text;
+      svg.append(text);
+    }
+
+    // 十字准线与提示框
+    const snapTimes = (cfg.snapTimes || allPoints.map((p) => p.t)).slice().sort((a, b) => a - b)
+      .filter((t, i, arr) => i === 0 || t !== arr[i - 1]);
+    const crosshair = svgEl('line', {
+      y1: margin.top, y2: margin.top + plotH, stroke: 'var(--axis)', 'stroke-width': 1, visibility: 'hidden'
+    });
+    svg.append(crosshair);
+    const hit = svgEl('rect', {
+      x: margin.left, y: margin.top, width: plotW, height: plotH, fill: 'transparent', style: 'cursor: crosshair'
+    });
+    svg.append(hit);
+
+    let activeIndex = -1;
+    function show(index) {
+      if (index < 0 || index >= snapTimes.length) return;
+      activeIndex = index;
+      const t = snapTimes[index];
+      const rows = cfg.tooltip(t);
+      const px = x(t);
+      crosshair.setAttribute('x1', px);
+      crosshair.setAttribute('x2', px);
+      crosshair.setAttribute('visibility', 'visible');
+
+      tooltip.replaceChildren(el('div', { class: 't-title', text: fmtDateTime(t) }));
+      for (const row of rows) {
+        tooltip.append(el('div', { class: 't-row' },
+          row.color ? el('i', { style: `background:${row.color}` }) : null,
+          el('b', { text: row.value }),
+          el('span', { text: row.label })));
+      }
+      tooltip.style.display = 'block';
+      const scale = svg.getBoundingClientRect().width / width;
+      const left = px * scale;
+      const tipWidth = tooltip.offsetWidth;
+      const boxWidth = container.clientWidth;
+      tooltip.style.left = `${left + 12 + tipWidth > boxWidth ? Math.max(0, left - tipWidth - 12) : left + 12}px`;
+      tooltip.style.top = `${(showLegend ? 24 : 0) + margin.top * scale}px`;
+    }
+    function hide() {
+      activeIndex = -1;
+      crosshair.setAttribute('visibility', 'hidden');
+      tooltip.style.display = 'none';
+    }
+    function nearestIndex(t) {
+      let best = 0;
+      for (let i = 1; i < snapTimes.length; i++) {
+        if (Math.abs(snapTimes[i] - t) < Math.abs(snapTimes[best] - t)) best = i;
+      }
+      return best;
+    }
+
+    svg.addEventListener('pointermove', (event) => {
+      const rect = svg.getBoundingClientRect();
+      const px = (event.clientX - rect.left) * (width / rect.width);
+      if (px < margin.left - 8 || px > margin.left + plotW + 8) { hide(); return; }
+      const t = tMin + ((px - margin.left) / plotW) * (tMax - tMin);
+      show(nearestIndex(t));
+    });
+    svg.addEventListener('pointerleave', hide);
+    svg.addEventListener('focus', () => show(snapTimes.length - 1));
+    svg.addEventListener('blur', hide);
+    svg.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowLeft') { show(Math.max(0, activeIndex - 1)); event.preventDefault(); }
+      if (event.key === 'ArrowRight') { show(Math.min(snapTimes.length - 1, activeIndex + 1)); event.preventDefault(); }
+      if (event.key === 'Escape') hide();
+    });
+  }
+
+  // ---------- 日志 ----------
+  const logView = $('logView');
+  const logFilter = $('logFilter');
+  const autoScroll = $('logAutoScroll');
+
+  function logMatches(node) {
+    const keyword = logFilter.value.trim().toLowerCase();
+    return !keyword || node.dataset.text.includes(keyword);
+  }
+
+  function appendLogs(lines) {
+    if (!lines.length) return;
+    const fragment = document.createDocumentFragment();
+    for (const line of lines) {
+      const node = el('div', { class: 'log-line' }, el('span', { class: 'lt', text: line.time }), line.text);
+      if (BAD_LOG.test(line.text)) node.classList.add('bad');
+      else if (GOOD_LOG.test(line.text)) node.classList.add('good');
+      node.dataset.text = `${line.time} ${line.text}`.toLowerCase();
+      node.hidden = !logMatches(node);
+      fragment.append(node);
+    }
+    logView.append(fragment);
+    while (logView.childElementCount > MAX_LOG_LINES) logView.firstElementChild.remove();
+    if (autoScroll.checked) logView.scrollTop = logView.scrollHeight;
+  }
+
+  function clearLogView() {
+    logView.replaceChildren();
+  }
+
+  logFilter.addEventListener('input', () => {
+    for (const node of logView.children) node.hidden = !logMatches(node);
+    if (autoScroll.checked) logView.scrollTop = logView.scrollHeight;
+  });
+  $('btnLogClear').addEventListener('click', clearLogView);
+
+  // ---------- 筛选与布局 ----------
+  $('rangeSeg').addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-range]');
+    if (!button) return;
+    for (const item of $('rangeSeg').querySelectorAll('button')) item.setAttribute('aria-pressed', String(item === button));
+    state.range = Number(button.dataset.range);
+    renderLatency();
+    renderRunChart();
+  });
+
+  $('btnLatencyTable').addEventListener('click', (event) => {
+    state.showLatencyTable = !state.showLatencyTable;
+    event.currentTarget.setAttribute('aria-pressed', String(state.showLatencyTable));
+    event.currentTarget.textContent = state.showLatencyTable ? '图表' : '表格';
+    renderLatency();
+  });
+
+  let resizeTimer = 0;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { renderLatency(); renderRunChart(); }, 150);
+  });
+
+  setInterval(tick, 1000);
+  // 每分钟重绘一次图表，让时间窗口跟随当前时间滑动
+  setInterval(() => { renderLatency(); renderRunChart(); }, 60000);
+  poll(refreshStatus, 2000);
+  poll(refreshLogs, 1500);
+})();
+</script>
+</body>
+</html>
