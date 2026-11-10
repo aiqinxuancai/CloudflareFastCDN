@@ -217,12 +217,14 @@ namespace CloudflareFastCDN
             DashboardState.SetPhase(DashboardPhase.InitialCheck, "解析已配置域名");
 
             var resolvedIps = new Dictionary<IPAddress, ResolvedDomainIp>();
+            var coveredRanks = new HashSet<int>();
             foreach (var dnsUpdateProvider in dnsUpdateProviders)
             {
                 for (int rank = 0; rank < 3; rank++)
                 {
                     foreach (var domain in dnsUpdateProvider.GetDomains(rank))
                     {
+                        coveredRanks.Add(rank + 1);
                         IPAddress[] addresses;
                         try
                         {
@@ -296,7 +298,51 @@ namespace CloudflareFastCDN
 
             Console.WriteLine($"首次域名预检的{assignedIps.Count}个IPv4地址均正常，跳过首次全量优选");
             DashboardState.SetAssignedIps(assignedIps.Select(item => (item.Rank, item.IP.ToString(), item.BaselineDelay.TotalMilliseconds)));
-            return new SelectionResult(assignedIps);
+            return new SelectionResult(assignedIps, coveredRanks);
+        }
+
+        /// <summary>
+        /// 当前配置中存在域名的名次（1-3）。
+        /// </summary>
+        private static IEnumerable<int> GetConfiguredRanks()
+        {
+            var domainGroupsByRank = new[]
+            {
+                new[] { AppConfig.CloudflareDomains, AppConfig.TencentCloudDomains, AppConfig.AlibabaCloudDomains },
+                new[] { AppConfig.CloudflareDomains2, AppConfig.TencentCloudDomains2, AppConfig.AlibabaCloudDomains2 },
+                new[] { AppConfig.CloudflareDomains3, AppConfig.TencentCloudDomains3, AppConfig.AlibabaCloudDomains3 },
+            };
+
+            for (int rank = 0; rank < domainGroupsByRank.Length; rank++)
+            {
+                if (HasAnyDomains(domainGroupsByRank[rank]))
+                {
+                    yield return rank + 1;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 已配置域名但上一轮没有分配到IP的名次（例如可用IP不足或DNS更新失败），这些名次需要重新全量优选才能补齐。
+        /// </summary>
+        private static List<int> GetMissingRanks(SelectionResult selection)
+        {
+            return GetConfiguredRanks()
+                .Where(rank => !selection.CoveredRanks.Contains(rank))
+                .ToList();
+        }
+
+        private static string FormatRanks(IEnumerable<int> ranks)
+        {
+            return string.Join("、", ranks.Select(rank => $"Top{rank}"));
+        }
+
+        private static string DescribeExpiryAction(SelectionResult selection)
+        {
+            var missingRanks = GetMissingRanks(selection);
+            return missingRanks.Count > 0
+                ? $"上轮{FormatRanks(missingRanks)}没有分配到IP，到期后重新全量优选"
+                : $"到期后先复检{selection.AssignedIps.Count}个已分配IP";
         }
 
         /// <summary>
@@ -318,7 +364,7 @@ namespace CloudflareFastCDN
             {
                 Console.WriteLine(selection.AssignedIps.Count == 0
                     ? $"等待{AppConfig.RunMinutes}分钟；本轮没有已分配IP，到期后重新优选"
-                    : $"等待{AppConfig.RunMinutes}分钟；到期后先复检{selection.AssignedIps.Count}个已分配IP");
+                    : $"等待{AppConfig.RunMinutes}分钟；{DescribeExpiryAction(selection)}");
                 var request = await RuntimeControl.WaitAsync(regularInterval);
                 return await HandleWaitFinished(selection, request);
             }
@@ -329,7 +375,7 @@ namespace CloudflareFastCDN
             }
             else
             {
-                Console.WriteLine($"等待{AppConfig.RunMinutes}分钟；期间每{SupplementalHttpCheckInterval.TotalMinutes:0}分钟对 {selection.AssignedIps[0].IP} 进行补充HTTP检查，到期后复检{selection.AssignedIps.Count}个已分配IP");
+                Console.WriteLine($"等待{AppConfig.RunMinutes}分钟；期间每{SupplementalHttpCheckInterval.TotalMinutes:0}分钟对 {selection.AssignedIps[0].IP} 进行补充HTTP检查，{DescribeExpiryAction(selection)}");
             }
 
             while (true)
@@ -377,6 +423,17 @@ namespace CloudflareFastCDN
             }
 
             var manual = request.Command == ManualCommand.Revalidate;
+            if (!manual && selection.AssignedIps.Count > 0)
+            {
+                // 已分配IP复检只覆盖已有名次；缺失名次若不重新优选将永远无法补齐
+                var missingRanks = GetMissingRanks(selection);
+                if (missingRanks.Count > 0)
+                {
+                    Console.WriteLine($"到达定时优选时间，上轮{FormatRanks(missingRanks)}没有分配到IP，跳过复检直接开始全量优选");
+                    return "上轮可用IP不足";
+                }
+            }
+
             if (await ValidateAssignedIps(selection.AssignedIps, manual))
             {
                 return null;
@@ -837,8 +894,13 @@ namespace CloudflareFastCDN
             return TimeSpan.FromMilliseconds(milliseconds);
         }
 
-        private sealed record SelectionResult(IReadOnlyList<AssignedIp> AssignedIps)
+        private sealed record SelectionResult(IReadOnlyList<AssignedIp> AssignedIps, IReadOnlySet<int> CoveredRanks)
         {
+            public SelectionResult(IReadOnlyList<AssignedIp> assignedIps)
+                : this(assignedIps, assignedIps.Select(item => item.Rank).ToHashSet())
+            {
+            }
+
             public static SelectionResult Empty { get; } = new(Array.Empty<AssignedIp>());
         }
 
