@@ -3,363 +3,682 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>CloudflareFastCDN 管理面板</title>
+<script>
+  // 尽早应用用户选择的主题，避免首屏闪烁
+  try {
+    const theme = localStorage.getItem('cfcdn-theme');
+    if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  } catch (error) { /* 本地存储不可用时跟随系统 */ }
+</script>
 <style>
+/* ---------- 设计令牌 ---------- */
 :root {
   color-scheme: light;
-  --page: #f9f9f7;
+  --page: #f3f3f0;
   --surface-1: #fcfcfb;
+  --surface-2: #f6f6f3;
   --text-primary: #0b0b0b;
   --text-secondary: #52514e;
   --text-muted: #898781;
   --grid: #e1e0d9;
   --axis: #c3c2b7;
   --border: rgba(11, 11, 11, 0.10);
+  --border-strong: rgba(11, 11, 11, 0.18);
   --wash: rgba(11, 11, 11, 0.04);
+  --wash-strong: rgba(11, 11, 11, 0.07);
   --series-1: #2a78d6;
   --series-2: #eb6834;
   --series-3: #1baf7a;
   --accent: #2a78d6;
+  --accent-hover: #256abf;
   --accent-ink: #ffffff;
+  --accent-soft: rgba(42, 120, 214, 0.10);
+  --meter-track: #cde2fb;
   --good: #0ca30c;
   --good-text: #006300;
+  --good-soft: rgba(12, 163, 12, 0.09);
   --critical: #d03b3b;
+  --critical-text: #b83232;
+  --critical-soft: rgba(208, 59, 59, 0.09);
   --warning: #fab219;
+  --warning-text: #7a5000;
+  --warning-soft: rgba(250, 178, 25, 0.16);
+  --header-bg: rgba(252, 252, 251, 0.82);
+  --shadow-sm: 0 1px 2px rgba(11, 11, 11, 0.04), 0 1px 1px rgba(11, 11, 11, 0.02);
+  --shadow-md: 0 12px 32px rgba(11, 11, 11, 0.10), 0 2px 6px rgba(11, 11, 11, 0.05);
+  --radius-lg: 14px;
+  --radius: 10px;
+  --radius-sm: 7px;
   --font: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
     --page: #0d0d0d;
     --surface-1: #1a1a19;
+    --surface-2: #141413;
     --text-primary: #f0efec;
     --text-secondary: #c3c2b7;
     --text-muted: #898781;
     --grid: #2c2c2a;
     --axis: #383835;
     --border: rgba(255, 255, 255, 0.10);
+    --border-strong: rgba(255, 255, 255, 0.18);
     --wash: rgba(255, 255, 255, 0.05);
+    --wash-strong: rgba(255, 255, 255, 0.08);
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
     --accent: #3987e5;
+    --accent-hover: #5598e7;
+    --accent-soft: rgba(57, 135, 229, 0.16);
+    --meter-track: #104281;
     --good-text: #0ca30c;
+    --good-soft: rgba(12, 163, 12, 0.15);
+    --critical-text: #e66767;
+    --critical-soft: rgba(208, 59, 59, 0.16);
+    --warning-text: #fab219;
+    --warning-soft: rgba(250, 178, 25, 0.14);
+    --header-bg: rgba(20, 20, 19, 0.80);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow-md: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
   }
 }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface-1: #1a1a19;
+  --surface-2: #141413;
+  --text-primary: #f0efec;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --wash: rgba(255, 255, 255, 0.05);
+  --wash-strong: rgba(255, 255, 255, 0.08);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --accent: #3987e5;
+  --accent-hover: #5598e7;
+  --accent-soft: rgba(57, 135, 229, 0.16);
+  --meter-track: #104281;
+  --good-text: #0ca30c;
+  --good-soft: rgba(12, 163, 12, 0.15);
+  --critical-text: #e66767;
+  --critical-soft: rgba(208, 59, 59, 0.16);
+  --warning-text: #fab219;
+  --warning-soft: rgba(250, 178, 25, 0.14);
+  --header-bg: rgba(20, 20, 19, 0.80);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+/* ---------- 基础 ---------- */
 * { box-sizing: border-box; }
+html { scroll-padding-top: 84px; }
 body {
   margin: 0;
   background: var(--page);
   color: var(--text-primary);
-  font: 14px/1.5 var(--font);
+  font: 14px/1.55 var(--font);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px 16px;
-  padding: 12px 24px;
-  background: var(--surface-1);
-  border-bottom: 1px solid var(--border);
-}
-header h1 { margin: 0; font-size: 16px; font-weight: 600; }
-.conn { color: var(--text-muted); font-size: 12px; }
-.conn.bad { color: var(--critical); }
-.spacer { flex: 1; }
-button {
-  font: inherit;
-  border: 1px solid var(--border);
-  background: var(--surface-1);
-  color: var(--text-primary);
-  border-radius: 6px;
-  padding: 6px 14px;
-  cursor: pointer;
-}
-button:hover:not(:disabled) { background: var(--wash); }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
-button:focus-visible, input:focus-visible, svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
-.seg button { border: 0; border-radius: 0; padding: 4px 12px; }
-.seg button + button { border-left: 1px solid var(--border); }
-.seg button[aria-pressed="true"] { background: var(--wash); font-weight: 600; }
-main { max-width: 1400px; margin: 0 auto; padding: 20px 24px 40px; display: grid; gap: 16px; }
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
-.card {
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px 20px;
-  min-width: 0;
-}
-.card h2 { margin: 0 0 12px; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-.card h2 .sub { font-weight: 400; color: var(--text-muted); font-size: 12px; }
-.card h2 .tools { margin-left: auto; display: flex; gap: 8px; align-items: center; font-weight: 400; }
-.tile .label { color: var(--text-secondary); font-size: 13px; }
-.tile .value { font-size: 24px; font-weight: 600; margin-top: 4px; overflow-wrap: anywhere; }
-.tile .meta { color: var(--text-muted); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
-.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 16px; }
-.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.filters .label { color: var(--text-secondary); }
-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
-th { color: var(--text-secondary); font-weight: 500; font-size: 12px; white-space: nowrap; }
-td.num, th.num { text-align: right; }
+.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .mono { font-family: var(--mono); font-size: 13px; }
 .muted { color: var(--text-muted); }
-.table-wrap { overflow-x: auto; }
-.table-wrap.scroll { max-height: 360px; overflow-y: auto; }
-.empty { color: var(--text-muted); padding: 16px 0; text-align: center; }
-.rank-key { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.rank-key i { display: inline-block; width: 14px; height: 2px; border-radius: 1px; }
-.status { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-.status .icon { font-weight: 700; }
-.status.good .icon { color: var(--good); }
-.status.bad .icon { color: var(--critical); }
-.status.good { color: var(--good-text); }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- 按钮 ---------- */
+button { font: inherit; color: inherit; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 34px; padding: 0 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+  box-shadow: var(--shadow-sm); cursor: pointer; white-space: nowrap;
+  transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s;
+}
+.btn:hover:not(:disabled) { background: var(--surface-2); border-color: var(--border-strong); }
+.btn:active:not(:disabled) { transform: translateY(0.5px); }
+.btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
+.btn.primary { background: var(--accent); border-color: transparent; color: var(--accent-ink); font-weight: 500; }
+.btn.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: transparent; }
+.btn.ghost { background: transparent; box-shadow: none; border-color: transparent; color: var(--text-secondary); }
+.btn.ghost:hover:not(:disabled) { background: var(--wash); color: var(--text-primary); border-color: transparent; }
+.btn.sm { height: 28px; padding: 0 10px; font-size: 13px; }
+.btn.icon { width: 34px; padding: 0; }
+.btn.icon.sm { width: 28px; }
+
+/* ---------- 顶栏 ---------- */
+.topbar {
+  position: sticky; top: 0; z-index: 30;
+  background: var(--header-bg);
+  -webkit-backdrop-filter: saturate(160%) blur(14px);
+  backdrop-filter: saturate(160%) blur(14px);
+  border-bottom: 1px solid var(--border);
+}
+.topbar-inner {
+  max-width: 1440px; margin: 0 auto; padding: 10px 28px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+}
+.brand { display: inline-flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; }
+.brand .logo {
+  width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center;
+  background: var(--accent); color: var(--accent-ink);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15), 0 2px 8px var(--accent-soft);
+}
+.brand .logo .i { width: 18px; height: 18px; stroke-width: 2; }
+.brand b { display: block; font-size: 15px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.2; }
+.brand small { display: block; font-size: 12px; color: var(--text-muted); line-height: 1.2; }
+.tabs { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--wash); }
+.tabs a {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; border-radius: 8px;
+  color: var(--text-secondary); text-decoration: none; font-weight: 500; transition: color .15s, background-color .15s;
+}
+.tabs a:hover { color: var(--text-primary); }
+.tabs a[aria-current="page"] { color: var(--text-primary); background: var(--surface-1); box-shadow: var(--shadow-sm), 0 0 0 1px var(--border); }
+.spacer { flex: 1; }
 .phase-pill {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
+  display: inline-flex; align-items: center; gap: 8px; max-width: 420px;
+  height: 30px; padding: 0 12px; border-radius: 999px;
+  background: var(--surface-1); border: 1px solid var(--border);
   color: var(--text-secondary); font-size: 13px;
 }
-.phase-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
-.phase-pill.busy .dot { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
-@keyframes pulse { 50% { opacity: 0.3; } }
-.progress { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--text-secondary); font-size: 13px; margin-bottom: 8px; }
-.progress b { color: var(--text-primary); font-weight: 600; }
+.phase-pill > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); flex: none; position: relative; }
+.busy .dot { background: var(--accent); }
+.busy .dot::after {
+  content: ""; position: absolute; inset: -4px; border-radius: 50%;
+  background: var(--accent); opacity: .35; animation: ping 1.6s cubic-bezier(0, 0, .2, 1) infinite;
+}
+.dot.idle { background: var(--good); }
+.dot.warn { background: var(--warning); }
+@keyframes ping { 0% { transform: scale(.5); opacity: .45; } 80%, 100% { transform: scale(1.6); opacity: 0; } }
+.conn { display: inline-flex; align-items: center; gap: 6px; color: var(--critical-text); font-size: 12px; }
+.conn:empty { display: none; }
+.actions { display: inline-flex; align-items: center; gap: 8px; }
+
+/* ---------- 布局 ---------- */
+main { max-width: 1440px; margin: 0 auto; padding: 24px 28px 56px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+.view { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; min-width: 0; }
+.section-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.section-head h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.005em; }
+.section-head .sub { color: var(--text-muted); font-size: 13px; }
+.section-head .tools { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.card {
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm); padding: 18px 20px; min-width: 0;
+}
+.card > .section-head { margin-bottom: 14px; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); gap: 20px; }
+
+/* ---------- 横幅 ---------- */
+.banner {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+  background: var(--warning-soft); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 12px 16px; color: var(--text-primary);
+}
+.banner .badge-icon { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--warning); color: #0b0b0b; flex: none; }
+.banner .badge-icon .i { width: 15px; height: 15px; stroke-width: 2.2; }
+.banner .text { flex: 1; min-width: 200px; }
+.banner a { color: var(--accent); font-weight: 500; text-decoration: none; }
+.banner a:hover { text-decoration: underline; }
+
+/* ---------- 指标卡 ---------- */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 20px; }
+.tile { display: flex; flex-direction: column; gap: 6px; padding: 18px 20px 16px; }
+.tile .label { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 13px; }
+.tile .label .i { color: var(--text-muted); }
+.tile .value-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; min-height: 40px; }
+.tile .value { font-size: 28px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.15; overflow-wrap: anywhere; }
+.tile .value .unit { font-size: 14px; font-weight: 500; color: var(--text-secondary); margin-left: 3px; letter-spacing: 0; }
+.tile .meta { color: var(--text-muted); font-size: 12.5px; overflow-wrap: anywhere; min-height: 19px; }
+.tile .spark { flex: none; display: block; }
+.meter { height: 6px; border-radius: 999px; background: var(--meter-track); overflow: hidden; margin-top: 4px; }
+.meter > span { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--accent); transition: width .9s linear; }
+.meter.idle { background: var(--wash-strong); }
+
+/* ---------- 已分配 IP ---------- */
+.rank-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 14px; }
+.rank-card {
+  position: relative; display: flex; flex-direction: column; gap: 12px; padding: 16px 18px 14px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); overflow: hidden;
+}
+.rank-card::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--rank-color, var(--axis)); }
+.rank-card.missing { background: transparent; border-style: dashed; }
+.rank-card.missing::before { opacity: .35; }
+.rank-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rank-ip { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 18px; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.rank-card.missing .rank-ip { font-family: var(--font); font-size: 15px; font-weight: 500; color: var(--text-secondary); }
+.rank-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; }
+.rank-metrics div { min-width: 0; }
+.rank-metrics dt { color: var(--text-muted); font-size: 12px; }
+.rank-metrics dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rank-note { color: var(--text-muted); font-size: 12.5px; margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.domain-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  padding: 2px 9px 2px 3px; border-radius: 999px; background: var(--surface-1); border: 1px solid var(--border);
+  font-size: 12.5px; color: var(--text-primary);
+}
+.domain-chip em { font-style: normal; font-size: 11px; color: var(--text-secondary); background: var(--wash-strong); border-radius: 999px; padding: 0 7px; }
+.domain-chip span { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank-key { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; font-weight: 600; }
+.rank-key i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; }
+
+/* ---------- 状态标记 ---------- */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px 0 6px; border-radius: 999px;
+  font-size: 12px; font-weight: 500; white-space: nowrap; background: var(--wash-strong); color: var(--text-secondary);
+}
+.chip .i { width: 13px; height: 13px; stroke-width: 2.4; }
+.chip.good { background: var(--good-soft); color: var(--good-text); }
+.chip.bad { background: var(--critical-soft); color: var(--critical-text); }
+.chip.warn { background: var(--warning-soft); color: var(--warning-text); }
+.chip.plain { padding: 0 8px; }
+
+/* ---------- 筛选 ---------- */
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.filters .label { color: var(--text-secondary); font-size: 13px; }
+.seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 9px; background: var(--wash); border: 1px solid var(--border); }
+.seg button {
+  border: 0; background: transparent; color: var(--text-secondary); border-radius: 6px;
+  padding: 3px 12px; font-size: 13px; cursor: pointer; transition: color .15s, background-color .15s;
+}
+.seg button:hover { color: var(--text-primary); }
+.seg button[aria-pressed="true"] { background: var(--surface-1); color: var(--text-primary); font-weight: 600; box-shadow: var(--shadow-sm), 0 0 0 1px var(--border); }
+
+/* ---------- 表格 ---------- */
+.table-wrap { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
+.table-wrap.scroll { max-height: 380px; overflow-y: auto; }
+table { width: 100%; border-collapse: separate; border-spacing: 0; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+th {
+  color: var(--text-muted); font-weight: 500; font-size: 12px; white-space: nowrap;
+  background: var(--surface-1); border-bottom-color: var(--axis);
+}
+.table-wrap.scroll thead th { position: sticky; top: 0; z-index: 1; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tbody tr { transition: background-color .12s; }
+tbody tr:hover td { background: var(--wash); }
+tbody tr:last-child td { border-bottom: 0; }
+td.empty, .empty { color: var(--text-muted); padding: 28px 0; text-align: center; }
+.assign-list { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.assign-list > span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.err-text { color: var(--text-muted); font-size: 12.5px; margin-left: 6px; }
+
+/* ---------- 优选流程 ---------- */
+.run-meta { display: flex; flex-wrap: wrap; gap: 6px 8px; margin-bottom: 14px; }
+.run-meta .chip b { color: var(--text-primary); font-weight: 600; margin-left: 2px; }
+.pipeline { display: flex; align-items: stretch; gap: 0; margin-bottom: 18px; overflow-x: auto; padding-bottom: 2px; }
+.stage {
+  flex: 1 1 0; min-width: 116px; padding: 12px 14px; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.stage .s-label { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.stage .s-value { font-size: 20px; font-weight: 650; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.stage .s-value small { font-size: 13px; font-weight: 500; color: var(--text-muted); }
+.stage.final { background: var(--accent-soft); border-color: transparent; }
+.stage-arrow { flex: none; width: 26px; display: grid; place-items: center; color: var(--axis); }
+.subhead { margin: 18px 0 8px; font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+
+/* ---------- 图表 ---------- */
 .chart-box { position: relative; }
-.chart-box svg { display: block; width: 100%; }
-.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-bottom: 6px; color: var(--text-secondary); font-size: 12px; }
+.chart-box svg { display: block; width: 100%; overflow: visible; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-bottom: 6px; color: var(--text-secondary); font-size: 12px; min-height: 18px; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
-.legend i { display: inline-block; width: 14px; height: 2px; border-radius: 1px; }
+.legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; }
 .legend .x { color: var(--critical); font-weight: 700; font-style: normal; }
 .tooltip {
-  position: absolute; pointer-events: none; z-index: 5;
-  background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  padding: 8px 10px; font-size: 12px; min-width: 180px; display: none;
+  position: absolute; pointer-events: none; z-index: 5; display: none;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow-md); padding: 10px 12px; font-size: 12px; min-width: 190px;
 }
-.tooltip .t-title { color: var(--text-muted); margin-bottom: 4px; }
-.tooltip .t-row { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
-.tooltip .t-row i { display: inline-block; width: 12px; height: 2px; border-radius: 1px; flex: none; align-self: center; }
+.tooltip .t-title { color: var(--text-muted); margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+.tooltip .t-row { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; line-height: 1.7; }
+.tooltip .t-row i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; flex: none; align-self: center; }
 .tooltip .t-row b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
 .tooltip .t-row span { color: var(--text-secondary); }
-.log-tools { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-.log-tools input[type="search"] {
-  font: inherit; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
-  background: var(--surface-1); color: var(--text-primary); width: 220px;
+
+/* ---------- 日志 ---------- */
+.search {
+  position: relative; display: inline-flex; align-items: center;
 }
+.search .i { position: absolute; left: 9px; color: var(--text-muted); pointer-events: none; }
+.search input {
+  font: inherit; font-size: 13px; height: 30px; padding: 0 10px 0 30px; width: 240px; max-width: 60vw;
+  border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary);
+  transition: border-color .15s, box-shadow .15s;
+}
+.search input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .log-view {
-  height: 480px; overflow: auto; background: var(--page); border: 1px solid var(--border); border-radius: 8px;
-  padding: 8px 0; font-family: var(--mono); font-size: 12px; line-height: 1.6;
+  height: 480px; overflow: auto; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 8px 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.7;
 }
-.log-line { padding: 0 12px; white-space: pre-wrap; word-break: break-all; border-left: 3px solid transparent; }
-.log-line .lt { color: var(--text-muted); margin-right: 8px; }
+.log-line { padding: 0 14px 0 11px; white-space: pre-wrap; word-break: break-all; border-left: 3px solid transparent; }
+.log-line:hover { background: var(--wash); }
+.log-line .lt { color: var(--text-muted); margin-right: 10px; user-select: none; }
 .log-line.bad { border-left-color: var(--critical); }
+.log-line.warn { border-left-color: var(--warning); }
 .log-line.good { border-left-color: var(--good); }
-.tabs { display: flex; gap: 4px; }
-.tabs a {
-  color: var(--text-secondary); text-decoration: none; padding: 4px 12px; border-radius: 6px;
+
+/* ---------- 开关 ---------- */
+.toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; color: var(--text-secondary); font-size: 13px; }
+.toggle input {
+  appearance: none; -webkit-appearance: none; margin: 0; flex: none; cursor: pointer;
+  width: 34px; height: 20px; border-radius: 999px; background: var(--axis); position: relative; transition: background-color .2s;
 }
-.tabs a:hover { background: var(--wash); }
-.tabs a[aria-current="page"] { color: var(--text-primary); background: var(--wash); font-weight: 600; }
-.view { display: grid; gap: 16px; }
-.view[hidden] { display: none; }
-.banner {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
-  background: var(--surface-1); border: 1px solid var(--border); border-left: 3px solid var(--warning);
-  border-radius: 10px; padding: 12px 16px;
+.toggle input::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: transform .2s;
 }
-.banner[hidden] { display: none; }
-.banner .icon { color: var(--warning); font-weight: 700; }
-.banner a { color: var(--accent); }
-.settings-intro { color: var(--text-secondary); margin: 0 0 8px; }
-.startup-list { display: flex; flex-wrap: wrap; gap: 4px 24px; font-size: 13px; color: var(--text-secondary); }
-.startup-list b { font-family: var(--mono); font-weight: 500; color: var(--text-primary); }
-.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px 24px; }
-.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.toggle input:checked { background: var(--accent); }
+.toggle input:checked::after { transform: translateX(14px); }
+.toggle input:disabled { opacity: .55; cursor: not-allowed; }
+
+/* ---------- 设置 ---------- */
+.settings-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 24px; align-items: start; }
+.settings-nav { position: sticky; top: 84px; display: flex; flex-direction: column; gap: 2px; }
+.settings-nav .nav-title { font-size: 12px; color: var(--text-muted); padding: 0 12px 6px; }
+.settings-nav button {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left;
+  border: 0; background: transparent; color: var(--text-secondary); padding: 7px 12px; border-radius: 8px; cursor: pointer;
+}
+.settings-nav button:hover { background: var(--wash); color: var(--text-primary); }
+.settings-nav button.active { background: var(--surface-1); color: var(--text-primary); font-weight: 500; box-shadow: var(--shadow-sm), 0 0 0 1px var(--border); }
+.settings-nav button .nav-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); visibility: hidden; }
+.settings-nav button.dirty .nav-dot { visibility: visible; }
+.settings-main { display: grid; gap: 20px; min-width: 0; }
+.settings-intro { color: var(--text-secondary); margin: 0 0 12px; }
+.startup-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.startup-list .kv { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-size: 12.5px; color: var(--text-secondary); }
+.startup-list .kv b { font-family: var(--mono); font-weight: 500; color: var(--text-primary); }
+.startup-caption { width: 100%; font-size: 12.5px; color: var(--text-muted); margin-bottom: 2px; }
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 22px 28px; }
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .field .field-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
-.field label.name { font-weight: 500; }
+.field label.name { font-weight: 550; }
 .field .key { font-family: var(--mono); font-size: 11px; color: var(--text-muted); }
-.field .tag {
-  font-size: 11px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 999px; padding: 0 8px;
-}
+.field .tag { font-size: 11px; color: var(--warning-text); background: var(--warning-soft); border-radius: 999px; padding: 0 8px; }
 .field input[type="text"], .field input[type="url"], .field input[type="number"], .field input[type="password"], .field textarea {
-  font: inherit; width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border);
-  background: var(--page); color: var(--text-primary);
+  font: inherit; width: 100%; padding: 7px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text-primary); transition: border-color .15s, box-shadow .15s, background-color .15s;
 }
-.field textarea { font-family: var(--mono); font-size: 13px; resize: vertical; min-height: 58px; }
-.field input:disabled, .field textarea:disabled { opacity: 0.65; cursor: not-allowed; }
+.field input:hover:not(:disabled), .field textarea:hover:not(:disabled) { border-color: var(--border-strong); }
+.field input:focus, .field textarea:focus { outline: none; border-color: var(--accent); background: var(--surface-1); box-shadow: 0 0 0 3px var(--accent-soft); }
+.field textarea { font-family: var(--mono); font-size: 13px; resize: vertical; min-height: 62px; }
+.field input:disabled, .field textarea:disabled { opacity: .6; cursor: not-allowed; }
 .field .control-row { display: flex; gap: 8px; align-items: flex-start; }
 .field .control-row > :first-child { flex: 1; min-width: 0; }
-.field .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; padding: 4px 0; }
-.field .switch input { width: 16px; height: 16px; accent-color: var(--accent); }
-.field .desc { font-size: 12px; color: var(--text-muted); }
-.field .lock { font-size: 12px; color: var(--text-secondary); }
-.field .error { font-size: 12px; color: var(--critical); }
+.field .toggle { padding: 4px 0; color: var(--text-primary); font-size: 14px; }
+.field .desc { font-size: 12.5px; color: var(--text-muted); }
+.field .lock { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); }
+.field .lock .i { width: 13px; height: 13px; }
+.field .error { font-size: 12.5px; color: var(--critical-text); }
 .field .error:empty { display: none; }
 .field.invalid input, .field.invalid textarea { border-color: var(--critical); }
-.field.changed label.name::after { content: " ●"; color: var(--accent); font-size: 10px; vertical-align: middle; }
+.field.invalid input:focus, .field.invalid textarea:focus { box-shadow: 0 0 0 3px var(--critical-soft); }
+.field.changed label.name::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: 6px; vertical-align: middle; }
+.settings-group { scroll-margin-top: 84px; }
+.settings-group .count { color: var(--text-muted); font-size: 12.5px; }
 .settings-actions {
-  position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
-  justify-content: flex-end; background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
-  padding: 12px 20px; box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.06);
+  position: sticky; bottom: 16px; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  background: var(--header-bg); -webkit-backdrop-filter: saturate(160%) blur(14px); backdrop-filter: saturate(160%) blur(14px);
+  border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 10px 12px 10px 18px; box-shadow: var(--shadow-md);
 }
-.settings-actions .muted { margin-right: auto; }
+.settings-actions .status-text { margin-right: auto; display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 13px; }
+
+/* ---------- 弹出层 ---------- */
 .toast {
-  position: fixed; right: 24px; bottom: 24px; z-index: 20; max-width: 360px;
-  background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15); padding: 10px 14px; display: none;
+  position: fixed; right: 24px; bottom: 24px; z-index: 50; max-width: min(400px, calc(100vw - 48px));
+  display: flex; align-items: flex-start; gap: 10px;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow-md); padding: 12px 16px 12px 12px;
+  opacity: 0; transform: translateY(12px); pointer-events: none; transition: opacity .2s, transform .2s;
 }
-.toast.show { display: block; }
-.toast .icon { font-weight: 700; margin-right: 6px; }
-.toast.good .icon { color: var(--good); }
-.toast.bad .icon { color: var(--critical); }
-details summary { cursor: pointer; color: var(--text-secondary); }
-@media (max-width: 640px) {
-  header, main { padding-left: 12px; padding-right: 12px; }
-  .grid-2 { grid-template-columns: 1fr; }
+.toast.show { opacity: 1; transform: none; pointer-events: auto; }
+.toast .badge-icon { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: none; color: #fff; }
+.toast .badge-icon .i { width: 13px; height: 13px; stroke-width: 2.6; }
+.toast.good .badge-icon { background: var(--good); }
+.toast.bad .badge-icon { background: var(--critical); }
+.toast .msg { padding-top: 1px; }
+dialog {
+  border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 0; width: min(440px, calc(100vw - 32px));
+  background: var(--surface-1); color: var(--text-primary); box-shadow: var(--shadow-md);
+}
+dialog::backdrop { background: rgba(11, 11, 11, 0.38); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+dialog[open] { animation: pop .18s ease-out; }
+@keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+dialog form { padding: 22px 22px 18px; display: grid; gap: 10px; }
+dialog h3 { margin: 0; font-size: 16px; font-weight: 600; }
+dialog p { margin: 0; color: var(--text-secondary); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+
+/* ---------- 响应式与动效偏好 ---------- */
+@media (max-width: 960px) {
+  .settings-layout { grid-template-columns: 1fr; }
+  .settings-nav { position: static; flex-direction: row; flex-wrap: wrap; }
+  .settings-nav .nav-title { display: none; }
+}
+@media (max-width: 720px) {
+  .topbar-inner, main { padding-left: 14px; padding-right: 14px; }
+  .brand small { display: none; }
+  .spacer { display: none; }
+  .phase-pill { order: 10; max-width: 100%; flex: 1 1 100%; }
+  .actions { margin-left: auto; }
+  .actions .btn .label { display: none; }
+  .actions .btn:not(.icon) { width: 34px; padding: 0; }
+  .card { padding: 16px; }
+  .log-view { height: 380px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+@media (forced-colors: active) {
+  .rank-card::before, .meter > span { background: CanvasText; }
 }
 </style>
 </head>
 <body>
-<header>
-  <h1>CloudflareFastCDN</h1>
-  <nav class="tabs" aria-label="页面">
-    <a href="#dashboard" id="tabDashboard" aria-current="page">概览</a>
-    <a href="#settings" id="tabSettings">设置</a>
-  </nav>
-  <span id="phasePill" class="phase-pill"><span class="dot"></span><span id="phaseText">连接中…</span></span>
-  <span id="conn" class="conn"></span>
-  <span class="spacer"></span>
-  <button id="btnRevalidate" type="button" title="提前结束等待，立即复检已分配的IP；复检不通过时自动进入全量优选">立即复检</button>
-  <button id="btnSelect" type="button" class="primary" title="立即执行一次全量优选并更新DNS记录">立即优选</button>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 8v5M12 16.5v.01"/><path d="M10.3 3.9 2.4 17.5A2 2 0 0 0 4.1 20.5h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 8-6-16-3 8H2"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M12 14l4-4"/><path d="M3.3 17a10 10 0 1 1 17.4 0"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7l10-5z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-eraser" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3a1 1 0 0 1 0-1.4l10-10a1 1 0 0 1 1.4 0l5.6 5.6a1 1 0 0 1 0 1.4L11 21"/><path d="M22 21H7M5 11l9 9"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-table" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 10v10"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 6-6"/></symbol>
+  <symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M2 2l20 20M8.5 16.4a5 5 0 0 1 7 0M5 12.9a10 10 0 0 1 5.2-2.8M19 12.9a10 10 0 0 0-2.3-1.6M12 20h.01"/></symbol>
+</svg>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="#dashboard" aria-label="CloudflareFastCDN 概览">
+      <span class="logo" aria-hidden="true"><svg class="i"><use href="#i-zap"/></svg></span>
+      <span><b>CloudflareFastCDN</b><small>Cloudflare 优选 IP 管理</small></span>
+    </a>
+    <nav class="tabs" aria-label="页面">
+      <a href="#dashboard" id="tabDashboard" aria-current="page"><svg class="i" aria-hidden="true"><use href="#i-grid"/></svg>概览</a>
+      <a href="#settings" id="tabSettings"><svg class="i" aria-hidden="true"><use href="#i-sliders"/></svg>设置</a>
+    </nav>
+    <span class="spacer"></span>
+    <span id="phasePill" class="phase-pill" role="status"><span class="dot"></span><span id="phaseText">连接中…</span></span>
+    <span id="conn" class="conn" role="alert"></span>
+    <span class="actions">
+      <button id="btnTheme" type="button" class="btn ghost icon" title="主题：跟随系统" aria-label="切换主题"><svg class="i"><use href="#i-monitor"/></svg></button>
+      <button id="btnRevalidate" type="button" class="btn" title="提前结束等待，立即复检已分配的IP；复检不通过时自动进入全量优选"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg><span class="label">立即复检</span></button>
+      <button id="btnSelect" type="button" class="btn primary" title="立即执行一次全量优选并更新DNS记录"><svg class="i" aria-hidden="true"><use href="#i-zap"/></svg><span class="label">立即优选</span></button>
+    </span>
+  </div>
 </header>
 
 <main>
   <div id="setupBanner" class="banner" role="alert" hidden>
-    <span class="icon" aria-hidden="true">!</span>
-    <span><b>尚未完成 DNS 配置</b>：<span id="setupBannerText"></span></span>
-    <a href="#settings">前往设置</a>
+    <span class="badge-icon" aria-hidden="true"><svg class="i"><use href="#i-alert"/></svg></span>
+    <span class="text"><b>尚未完成 DNS 配置</b>　<span id="setupBannerText"></span></span>
+    <a href="#settings">前往设置 →</a>
   </div>
 
   <div id="viewDashboard" class="view">
-  <section class="tiles" aria-label="概览">
-    <div class="card tile">
-      <div class="label">当前状态</div>
-      <div class="value" id="tilePhase">—</div>
-      <div class="meta" id="tilePhaseMeta">&nbsp;</div>
-    </div>
-    <div class="card tile">
-      <div class="label">下次检查</div>
-      <div class="value" id="tileNext">—</div>
-      <div class="meta" id="tileNextMeta">&nbsp;</div>
-    </div>
-    <div class="card tile">
-      <div class="label">Top1 当前延迟</div>
-      <div class="value" id="tileTop1">—</div>
-      <div class="meta" id="tileTop1Meta">&nbsp;</div>
-    </div>
-    <div class="card tile">
-      <div class="label">已完成优选</div>
-      <div class="value" id="tileRuns">—</div>
-      <div class="meta" id="tileRunsMeta">&nbsp;</div>
-    </div>
-  </section>
-
-  <section class="card">
-    <h2>已分配 IP <span class="sub">DNS 记录当前指向的优选结果</span></h2>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>排名</th><th>IP</th><th class="num">基线延迟</th><th class="num">最近延迟</th><th>最近检查</th><th>状态</th><th>域名</th></tr></thead>
-        <tbody id="assignedBody"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <div class="filters" role="group" aria-label="时间范围">
-    <span class="label">时间范围</span>
-    <span class="seg" id="rangeSeg">
-      <button type="button" data-range="21600000">6 小时</button>
-      <button type="button" data-range="86400000" aria-pressed="true">24 小时</button>
-      <button type="button" data-range="604800000">7 天</button>
-      <button type="button" data-range="2592000000">30 天</button>
-      <button type="button" data-range="0">全部</button>
-    </span>
-  </div>
-
-  <div class="grid-2">
-    <section class="card">
-      <h2>已分配 IP 的 HTTP 延迟 <span class="sub">ms</span>
-        <span class="tools"><button type="button" id="btnLatencyTable" aria-pressed="false">表格</button></span>
-      </h2>
-      <div id="latencyChart" class="chart-box"></div>
-      <div id="latencyTable" class="table-wrap scroll" hidden></div>
+    <section class="tiles" aria-label="概览">
+      <div class="card tile">
+        <div class="label"><svg class="i" aria-hidden="true"><use href="#i-activity"/></svg>当前状态</div>
+        <div class="value-row"><div class="value" id="tilePhase">—</div></div>
+        <div class="meta" id="tilePhaseMeta">&nbsp;</div>
+      </div>
+      <div class="card tile">
+        <div class="label"><svg class="i" aria-hidden="true"><use href="#i-clock"/></svg>下次检查</div>
+        <div class="value-row"><div class="value" id="tileNext">—</div></div>
+        <div class="meter idle" id="tileNextMeter" role="progressbar" aria-label="本周期等待进度" aria-valuemin="0" aria-valuemax="100"><span></span></div>
+        <div class="meta" id="tileNextMeta">&nbsp;</div>
+      </div>
+      <div class="card tile">
+        <div class="label"><svg class="i" aria-hidden="true"><use href="#i-gauge"/></svg>Top1 当前延迟</div>
+        <div class="value-row"><div class="value" id="tileTop1">—</div><span id="tileTop1Spark"></span></div>
+        <div class="meta" id="tileTop1Meta">&nbsp;</div>
+      </div>
+      <div class="card tile">
+        <div class="label"><svg class="i" aria-hidden="true"><use href="#i-layers"/></svg>已完成优选</div>
+        <div class="value-row"><div class="value" id="tileRuns">—</div></div>
+        <div class="meta" id="tileRunsMeta">&nbsp;</div>
+      </div>
     </section>
+
     <section class="card">
-      <h2>每轮优选的 Top1 HTTP 延迟 <span class="sub">ms</span></h2>
-      <div id="runChart" class="chart-box"></div>
+      <div class="section-head">
+        <h2>已分配 IP</h2>
+        <span class="sub">DNS 记录当前指向的优选结果</span>
+      </div>
+      <div id="assignedGrid" class="rank-grid"></div>
     </section>
-  </div>
 
-  <section class="card">
-    <h2 id="runTitle">最近一次优选</h2>
-    <div class="progress" id="runProgress"></div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>#</th><th>IP</th><th>来源</th><th class="num">Ping</th><th class="num">HTTP 成功</th><th class="num">HTTP 均延迟</th><th class="num">下载速度</th><th>结果</th></tr></thead>
-        <tbody id="candidateBody"></tbody>
-      </table>
-    </div>
-    <div id="dnsUpdates" class="table-wrap" style="margin-top: 12px"></div>
-  </section>
-
-  <section class="card">
-    <h2>优选历史 <span class="sub">最近 50 次</span></h2>
-    <div class="table-wrap scroll">
-      <table>
-        <thead><tr><th>完成时间</th><th>触发原因</th><th>模式</th><th class="num">耗时</th><th class="num">抽样</th><th class="num">第1轮</th><th class="num">第2轮</th><th class="num">HTTP 通过</th><th>结果</th></tr></thead>
-        <tbody id="runsBody"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="card">
-    <h2>运行日志
-      <span class="tools log-tools">
-        <input type="search" id="logFilter" placeholder="筛选日志关键字" aria-label="筛选日志">
-        <label><input type="checkbox" id="logAutoScroll" checked> 自动滚动</label>
-        <button type="button" id="btnLogClear">清空显示</button>
+    <div class="filters" role="group" aria-label="时间范围">
+      <span class="label">时间范围</span>
+      <span class="seg" id="rangeSeg">
+        <button type="button" data-range="21600000" aria-pressed="false">6 小时</button>
+        <button type="button" data-range="86400000" aria-pressed="true">24 小时</button>
+        <button type="button" data-range="604800000" aria-pressed="false">7 天</button>
+        <button type="button" data-range="2592000000" aria-pressed="false">30 天</button>
+        <button type="button" data-range="0" aria-pressed="false">全部</button>
       </span>
-    </h2>
-    <div id="logView" class="log-view" role="log" aria-live="off"></div>
-  </section>
+    </div>
 
+    <div class="grid-2">
+      <section class="card">
+        <div class="section-head">
+          <h2>已分配 IP 的 HTTP 延迟</h2><span class="sub">ms</span>
+          <span class="tools">
+            <button type="button" id="btnLatencyTable" class="btn sm" aria-pressed="false"><svg class="i" aria-hidden="true"><use href="#i-table"/></svg><span class="label">表格</span></button>
+          </span>
+        </div>
+        <div id="latencyChart" class="chart-box"></div>
+        <div id="latencyTable" class="table-wrap scroll" hidden></div>
+      </section>
+      <section class="card">
+        <div class="section-head">
+          <h2>每轮优选的 Top1 HTTP 延迟</h2><span class="sub">ms</span>
+        </div>
+        <div id="runChart" class="chart-box"></div>
+      </section>
+    </div>
+
+    <section class="card">
+      <div class="section-head">
+        <h2 id="runTitle">最近一次优选</h2>
+        <span class="sub" id="runSubtitle"></span>
+      </div>
+      <div class="run-meta" id="runMeta"></div>
+      <div class="pipeline" id="runPipeline"></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>IP</th><th>来源</th><th class="num">Ping</th><th class="num">HTTP 成功</th><th class="num">HTTP 均延迟</th><th class="num">下载速度</th><th>结果</th></tr></thead>
+          <tbody id="candidateBody"></tbody>
+        </table>
+      </div>
+      <div id="dnsUpdates"></div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h2>优选历史</h2><span class="sub">最近 50 次</span>
+      </div>
+      <div class="table-wrap scroll">
+        <table>
+          <thead><tr><th>完成时间</th><th>触发原因</th><th>模式</th><th class="num">耗时</th><th class="num">抽样</th><th class="num">第1轮</th><th class="num">第2轮</th><th class="num">HTTP 通过</th><th>结果</th></tr></thead>
+          <tbody id="runsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h2>运行日志</h2>
+        <span class="tools">
+          <label class="search"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg><input type="search" id="logFilter" placeholder="筛选日志关键字" aria-label="筛选日志"></label>
+          <label class="toggle"><input type="checkbox" id="logAutoScroll" checked>自动滚动</label>
+          <button type="button" id="btnLogClear" class="btn sm ghost"><svg class="i" aria-hidden="true"><use href="#i-eraser"/></svg>清空显示</button>
+        </span>
+      </div>
+      <div id="logView" class="log-view" role="log" aria-live="off"></div>
+    </section>
   </div>
 
   <div id="viewSettings" class="view" hidden>
-    <section class="card">
-      <h2>设置 <span class="sub" id="settingsFile"></span></h2>
-      <p class="settings-intro">保存后立即生效：周期、超时等参数从下一次检测开始使用；修改 DNS 服务商凭证或域名会自动安排一次全量优选。由环境变量或命令行参数指定的项目已锁定，只能通过修改环境变量调整。</p>
-      <div class="startup-list" id="startupInfo"></div>
-    </section>
-    <form id="settingsForm" class="view" novalidate>
-      <div id="settingsGroups" class="view"></div>
-      <div class="settings-actions">
-        <span class="muted" id="settingsDirty">没有未保存的修改</span>
-        <button type="button" id="btnSettingsReset">放弃修改</button>
-        <button type="submit" class="primary" id="btnSettingsSave">保存设置</button>
+    <div class="settings-layout">
+      <nav class="settings-nav" id="settingsNav" aria-label="设置分组"></nav>
+      <div class="settings-main">
+        <section class="card">
+          <div class="section-head"><h2>设置</h2><span class="sub" id="settingsFile"></span></div>
+          <p class="settings-intro">保存后立即生效：周期、超时等参数从下一次检测开始使用；修改 DNS 服务商凭证或域名会自动安排一次全量优选。由环境变量或命令行参数指定的项目已锁定，只能通过修改环境变量调整。</p>
+          <div class="startup-list" id="startupInfo"></div>
+        </section>
+        <form id="settingsForm" class="view" novalidate>
+          <div id="settingsGroups" class="view"></div>
+          <div class="settings-actions">
+            <span class="status-text"><span class="dot" id="settingsDirtyDot"></span><span id="settingsDirty">没有未保存的修改</span></span>
+            <button type="button" class="btn" id="btnSettingsReset">放弃修改</button>
+            <button type="submit" class="btn primary" id="btnSettingsSave"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>保存设置</button>
+          </div>
+        </form>
       </div>
-    </form>
+    </div>
   </div>
 </main>
 
-<div id="toast" class="toast" role="status"><span class="icon"></span><span class="msg"></span></div>
+<div id="toast" class="toast" role="status" aria-live="polite"><span class="badge-icon" aria-hidden="true"></span><span class="msg"></span></div>
+
+<dialog id="confirmDialog" aria-labelledby="confirmTitle">
+  <form method="dialog">
+    <h3 id="confirmTitle"></h3>
+    <p id="confirmText"></p>
+    <div class="dialog-actions">
+      <button type="submit" value="cancel" class="btn">取消</button>
+      <button type="submit" value="ok" class="btn primary" id="confirmOk">确定</button>
+    </div>
+  </form>
+</dialog>
 
 <script>
 (() => {
@@ -382,6 +701,7 @@ details summary { cursor: pointer; color: var(--text-secondary); }
   const MAX_LOG_LINES = 3000;
   const BAD_LOG = /失败|异常|错误|无法|Exception|Error/i;
   const GOOD_LOG = /已完成更新|均正常|本轮实际分配|已启动/;
+  const WARN_LOG = /跳过|不足|重试|超时|排队/;
 
   const state = {
     status: null,
@@ -408,7 +728,7 @@ details summary { cursor: pointer; color: var(--text-secondary); }
       }
     }
     for (const child of children) {
-      if (child == null) continue;
+      if (child == null || child === false) continue;
       node.append(child instanceof Node ? child : document.createTextNode(String(child)));
     }
     return node;
@@ -416,8 +736,23 @@ details summary { cursor: pointer; color: var(--text-secondary); }
 
   function svgEl(tag, attrs) {
     const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
-    for (const [key, value] of Object.entries(attrs || {})) node.setAttribute(key, value);
+    for (const [key, value] of Object.entries(attrs || {})) {
+      if (value != null) node.setAttribute(key, value);
+    }
     return node;
+  }
+
+  function icon(name, cls) {
+    const svg = svgEl('svg', { class: cls ? `i ${cls}` : 'i', 'aria-hidden': 'true' });
+    const use = svgEl('use', { href: `#i-${name}` });
+    svg.append(use);
+    return svg;
+  }
+
+  function setButtonLabel(button, text) {
+    const label = button.querySelector('.label');
+    if (label) label.textContent = text;
+    else button.textContent = text;
   }
 
   // ---------- 格式化 ----------
@@ -426,16 +761,21 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     const d = new Date(value);
     return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
+  function fmtMsNumber(value) {
+    return value >= 100 ? String(Math.round(value)) : value.toFixed(1);
+  }
   function fmtMs(value) {
     if (value == null) return '—';
-    return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ms`;
+    return `${fmtMsNumber(value)} ms`;
   }
   function fmtDuration(ms) {
     if (ms == null || !isFinite(ms)) return '—';
     const total = Math.max(0, Math.round(ms / 1000));
-    const h = Math.floor(total / 3600);
+    const d = Math.floor(total / 86400);
+    const h = Math.floor((total % 86400) / 3600);
     const m = Math.floor((total % 3600) / 60);
     const s = total % 60;
+    if (d > 0) return `${d}天${h}小时`;
     if (h > 0) return `${h}小时${m}分`;
     if (m > 0) return `${m}分${pad(s)}秒`;
     return `${s}秒`;
@@ -451,20 +791,28 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     if (!value) return '—';
     const diff = serverNow() - new Date(value).getTime();
     if (diff < 60000) return '刚刚';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
     return `${fmtDuration(diff)}前`;
   }
   const serverNow = () => Date.now() + state.clockSkew;
 
+  /** 数值与单位分开排版，单位使用次级字号 */
+  function setMetric(node, value, unit) {
+    node.replaceChildren(String(value));
+    if (unit) node.append(el('span', { class: 'unit', text: unit }));
+  }
+
   function statusBadge(ok, goodText, badText) {
-    return el('span', { class: `status ${ok ? 'good' : 'bad'}` },
-      el('span', { class: 'icon', 'aria-hidden': 'true', text: ok ? '✓' : '✕' }),
-      ok ? goodText : badText);
+    const text = ok ? goodText : badText;
+    return el('span', { class: `chip ${ok ? 'good' : 'bad'}`, title: text || (ok ? '成功' : '失败') },
+      icon(ok ? 'check' : 'x'), text || null);
+  }
+  function rankColor(rank) {
+    const series = SERIES.find((item) => item.rank === rank);
+    return series ? series.color : 'var(--text-muted)';
   }
   function rankKey(rank) {
-    const series = SERIES.find((item) => item.rank === rank);
-    return el('span', { class: 'rank-key' },
-      el('i', { style: `background:${series ? series.color : 'var(--text-muted)'}` }),
-      `Top${rank}`);
+    return el('span', { class: 'rank-key' }, el('i', { style: `background:${rankColor(rank)}` }), `Top${rank}`);
   }
 
   // ---------- 网络 ----------
@@ -480,8 +828,11 @@ details summary { cursor: pointer; color: var(--text-secondary); }
 
   function setConnection(ok) {
     const conn = $('conn');
-    conn.textContent = ok ? '' : '连接中断，正在重试…';
-    conn.classList.toggle('bad', !ok);
+    if (ok) {
+      conn.replaceChildren();
+    } else if (!conn.childElementCount) {
+      conn.replaceChildren(icon('wifi-off'), '连接中断，正在重试…');
+    }
   }
 
   async function refreshStatus() {
@@ -532,19 +883,65 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     }
   }
 
+  // ---------- 主题 ----------
+  const THEMES = [
+    { value: 'auto', icon: 'monitor', label: '跟随系统' },
+    { value: 'light', icon: 'sun', label: '浅色' },
+    { value: 'dark', icon: 'moon', label: '深色' }
+  ];
+  function currentTheme() {
+    const value = document.documentElement.dataset.theme;
+    return value === 'light' || value === 'dark' ? value : 'auto';
+  }
+  function renderThemeButton() {
+    const theme = THEMES.find((item) => item.value === currentTheme());
+    const button = $('btnTheme');
+    button.replaceChildren(icon(theme.icon));
+    button.title = `主题：${theme.label}（点击切换）`;
+  }
+  $('btnTheme').addEventListener('click', () => {
+    const index = THEMES.findIndex((item) => item.value === currentTheme());
+    const next = THEMES[(index + 1) % THEMES.length].value;
+    if (next === 'auto') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = next;
+    try {
+      if (next === 'auto') localStorage.removeItem('cfcdn-theme');
+      else localStorage.setItem('cfcdn-theme', next);
+    } catch (error) { /* 忽略 */ }
+    renderThemeButton();
+    // 图表通过 CSS 变量取色会自动切换；重绘一次以更新依赖计算样式的部分
+    renderLatency();
+    renderRunChart();
+  });
+  renderThemeButton();
+
   // ---------- 操作 ----------
   let toastTimer = 0;
   function showToast(ok, message) {
     const toast = $('toast');
     toast.className = `toast show ${ok ? 'good' : 'bad'}`;
-    toast.querySelector('.icon').textContent = ok ? '✓' : '✕';
+    toast.querySelector('.badge-icon').replaceChildren(icon(ok ? 'check' : 'x'));
     toast.querySelector('.msg').textContent = message;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toast.classList.remove('show'), 4000);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 4500);
   }
 
-  async function runAction(path, confirmText) {
-    if (confirmText && !window.confirm(confirmText)) return;
+  function confirmAction(title, text, okText) {
+    const dialog = $('confirmDialog');
+    if (typeof dialog.showModal !== 'function') return Promise.resolve(window.confirm(`${title}\n${text}`));
+    $('confirmTitle').textContent = title;
+    $('confirmText').textContent = text;
+    $('confirmOk').textContent = okText || '确定';
+    dialog.returnValue = '';
+    dialog.showModal();
+    $('confirmOk').focus();
+    return new Promise((resolve) => {
+      dialog.addEventListener('close', () => resolve(dialog.returnValue === 'ok'), { once: true });
+    });
+  }
+
+  async function runAction(path, confirm) {
+    if (confirm && !(await confirmAction(confirm.title, confirm.text, confirm.ok))) return;
     try {
       const response = await api(path, { method: 'POST', headers: { 'X-CFCDN-Action': '1' } });
       const result = await response.json().catch(() => ({ accepted: false, message: `HTTP ${response.status}` }));
@@ -555,8 +952,11 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     refreshStatus().catch(() => {});
   }
 
-  $('btnSelect').addEventListener('click', () =>
-    runAction('/api/actions/select', '立即执行一次全量优选？完成后会按结果更新 DNS 记录。'));
+  $('btnSelect').addEventListener('click', () => runAction('/api/actions/select', {
+    title: '立即执行全量优选？',
+    text: '将重新抽样、测试候选 IP，并在完成后按结果更新 DNS 记录。整个过程可能需要几分钟。',
+    ok: '开始优选'
+  }));
   $('btnRevalidate').addEventListener('click', () => runAction('/api/actions/revalidate'));
 
   // ---------- 状态渲染 ----------
@@ -564,22 +964,26 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     const status = state.status;
     if (!status) return;
     const phase = PHASES[status.phase] || { label: status.phase, busy: false };
+    const notConfigured = status.phase === 'not-configured';
 
     const pill = $('phasePill');
     pill.classList.toggle('busy', phase.busy);
+    pill.querySelector('.dot').className = `dot${phase.busy ? '' : notConfigured ? ' warn' : ' idle'}`;
     $('phaseText').textContent = status.phaseDetail ? `${phase.label} · ${status.phaseDetail}` : phase.label;
+    pill.title = $('phaseText').textContent;
 
-    const notConfigured = status.phase === 'not-configured';
     $('setupBanner').hidden = !notConfigured;
     $('setupBannerText').textContent = notConfigured ? status.phaseDetail || '' : '';
 
     $('btnSelect').disabled = notConfigured || status.phase === 'selecting' || status.pendingAction === 'select';
     $('btnRevalidate').disabled = notConfigured || status.phase === 'selecting' || status.phase === 'revalidating' || !!status.pendingAction;
-    $('btnSelect').textContent = status.pendingAction === 'select' ? '优选已排队' : '立即优选';
-    $('btnRevalidate').textContent = status.pendingAction === 'revalidate' ? '复检已排队' : '立即复检';
+    setButtonLabel($('btnSelect'), status.pendingAction === 'select' ? '优选已排队' : '立即优选');
+    setButtonLabel($('btnRevalidate'), status.pendingAction === 'revalidate' ? '复检已排队' : '立即复检');
 
     const top1 = status.assignedIps.find((item) => item.rank === 1) || status.assignedIps[0];
-    $('tileTop1').textContent = top1 ? fmtMs(top1.lastDelayMs ?? top1.baselineMs) : '—';
+    const top1Delay = top1 ? top1.lastDelayMs ?? top1.baselineMs : null;
+    if (top1Delay != null) setMetric($('tileTop1'), fmtMsNumber(top1Delay), 'ms');
+    else $('tileTop1').textContent = '—';
     $('tileTop1Meta').textContent = top1 ? `${top1.ip} · 基线 ${fmtMs(top1.baselineMs)}` : '暂无已分配 IP';
 
     $('tileRuns').textContent = String(status.completedRuns);
@@ -599,41 +1003,121 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     const elapsed = fmtDuration(serverNow() - new Date(status.phaseStartedAt).getTime());
     $('tilePhaseMeta').textContent = status.phaseDetail ? `${status.phaseDetail} · 已持续 ${elapsed}` : `已持续 ${elapsed}`;
 
+    const meter = $('tileNextMeter');
     if (status.nextCheckAt) {
-      const remaining = new Date(status.nextCheckAt).getTime() - serverNow();
+      const end = new Date(status.nextCheckAt).getTime();
+      const remaining = end - serverNow();
       $('tileNext').textContent = fmtCountdown(remaining);
-      $('tileNextMeta').textContent = `${fmtDateTime(status.nextCheckAt)} 复检已分配 IP`;
+      $('tileNextMeta').textContent = `${fmtDateTime(status.nextCheckAt)} 到期`;
+      const start = new Date(status.waitStartedAt || status.phaseStartedAt).getTime();
+      const ratio = end > start ? Math.min(1, Math.max(0, (serverNow() - start) / (end - start))) : 0;
+      meter.classList.remove('idle');
+      meter.firstElementChild.style.width = `${(ratio * 100).toFixed(2)}%`;
+      meter.setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
     } else {
       $('tileNext').textContent = '—';
-      $('tileNextMeta').textContent = phase.busy ? '当前任务完成后开始计时' : ' ';
+      $('tileNextMeta').textContent = phase.busy ? '当前任务完成后开始计时' : ' ';
+      meter.classList.add('idle');
+      meter.firstElementChild.style.width = '0';
+      meter.removeAttribute('aria-valuenow');
     }
+  }
+
+  function copyButton(text) {
+    if (!navigator.clipboard || !window.isSecureContext) return null;
+    const button = el('button', { type: 'button', class: 'btn ghost icon sm', title: '复制 IP', 'aria-label': `复制 ${text}` }, icon('copy'));
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast(true, `已复制 ${text}`);
+      } catch (error) {
+        showToast(false, '复制失败');
+      }
+    });
+    return button;
+  }
+
+  function domainChips(status, rank) {
+    const chips = el('div', { class: 'chips' });
+    for (const group of status.domainGroups.filter((item) => item.rank === rank)) {
+      for (const domain of group.domains) {
+        chips.append(el('span', { class: 'domain-chip', title: `${group.provider}: ${domain}` },
+          el('em', { text: group.provider }), el('span', { text: domain })));
+      }
+    }
+    return chips.childElementCount ? chips : null;
   }
 
   function renderAssigned(status) {
-    const body = $('assignedBody');
-    body.replaceChildren();
-    if (status.assignedIps.length === 0) {
-      body.append(el('tr', null, el('td', { colspan: '7', class: 'empty', text: '暂无已分配 IP' })));
+    const grid = $('assignedGrid');
+    const ranks = new Set(status.assignedIps.map((item) => item.rank));
+    for (const group of status.domainGroups) ranks.add(group.rank);
+    const ordered = [...ranks].sort((a, b) => a - b);
+
+    if (ordered.length === 0) {
+      grid.replaceChildren(el('div', { class: 'empty', text: '暂无已分配 IP' }));
       return;
     }
-    for (const item of status.assignedIps) {
-      const domains = status.domainGroups
-        .filter((group) => group.rank === item.rank)
-        .map((group) => `${group.provider}: ${group.domains.join(', ')}`)
-        .join('；');
-      body.append(el('tr', null,
-        el('td', null, rankKey(item.rank)),
-        el('td', { class: 'mono', text: item.ip }),
-        el('td', { class: 'num', text: fmtMs(item.baselineMs) }),
-        el('td', { class: 'num', text: fmtMs(item.lastDelayMs) }),
-        el('td', { class: 'muted', text: item.lastCheckedAt ? fmtDateTime(item.lastCheckedAt) : '—' }),
-        el('td', null, statusBadge(item.lastCheckOk, '正常', '检查失败')),
-        el('td', { class: 'muted', text: domains || '—' })));
-    }
+
+    grid.replaceChildren(...ordered.map((rank) => {
+      const item = status.assignedIps.find((entry) => entry.rank === rank);
+      const card = el('article', { class: `rank-card${item ? '' : ' missing'}`, style: `--rank-color:${rankColor(rank)}` });
+      if (!item) {
+        card.append(
+          el('div', { class: 'rank-head' }, rankKey(rank), el('span', { class: 'chip warn' }, icon('alert'), '未分配')),
+          el('div', { class: 'rank-ip', text: '暂无独立分配的 IP' }),
+          el('p', { class: 'rank-note', text: '该名次已配置域名，但上一轮可用 IP 不足或 DNS 更新失败；下一个周期会重新全量优选。' }),
+          domainChips(status, rank));
+        return card;
+      }
+      card.append(
+        el('div', { class: 'rank-head' }, rankKey(rank), statusBadge(item.lastCheckOk, '正常', '检查失败')),
+        el('div', { class: 'rank-ip' }, el('span', { text: item.ip }), copyButton(item.ip)),
+        el('dl', { class: 'rank-metrics' },
+          el('div', null, el('dt', { text: '基线延迟' }), el('dd', { text: fmtMs(item.baselineMs) })),
+          el('div', null, el('dt', { text: '最近延迟' }), el('dd', { text: fmtMs(item.lastDelayMs) })),
+          el('div', null, el('dt', { text: '最近检查' }),
+            el('dd', { text: item.lastCheckedAt ? fmtAgo(item.lastCheckedAt) : '—', title: item.lastCheckedAt ? fmtDateTime(item.lastCheckedAt) : null }))),
+        domainChips(status, rank));
+      return card;
+    }));
+  }
+
+  /** Top1 迷你趋势：弱化色折线，最新一点用强调色 */
+  function renderTop1Spark() {
+    const holder = $('tileTop1Spark');
+    holder.replaceChildren();
+    const history = state.history;
+    if (!history) return;
+    const points = history.latency
+      .filter((sample) => sample.rank === 1 && sample.delayMs != null)
+      .slice(-24)
+      .map((sample) => ({ t: new Date(sample.time).getTime(), v: sample.delayMs }));
+    if (points.length < 2) return;
+
+    const width = 108;
+    const height = 36;
+    const padY = 5;
+    const values = points.map((p) => p.v);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const span = max - min || 1;
+    const x = (i) => 4 + (i / (points.length - 1)) * (width - 8);
+    const y = (v) => padY + (1 - (v - min) / span) * (height - padY * 2);
+    const d = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join('');
+    const svg = svgEl('svg', { class: 'spark', width, height, viewBox: `0 0 ${width} ${height}`, role: 'img',
+      'aria-label': `Top1 最近 ${points.length} 次延迟，${fmtMs(min)} ~ ${fmtMs(max)}` });
+    const title = svgEl('title');
+    title.textContent = `最近 ${points.length} 次检查：最低 ${fmtMs(min)}，最高 ${fmtMs(max)}`;
+    svg.append(title);
+    svg.append(svgEl('path', { d, fill: 'none', stroke: 'var(--axis)', 'stroke-width': 1.75, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+    const last = points[points.length - 1];
+    svg.append(svgEl('circle', { cx: x(points.length - 1), cy: y(last.v), r: 3.5, fill: 'var(--series-1)', stroke: 'var(--surface-1)', 'stroke-width': 2 }));
+    holder.append(svg);
   }
 
   // ---------- 设置 ----------
-  const settingsState = { data: null, fields: new Map() };
+  const settingsState = { data: null, fields: new Map(), navButtons: [] };
   const isSensitive = (item) => item.type === 'secret' || item.type === 'headers';
   const splitDomains = (value) => value.split(/[\s,;，]+/).filter(Boolean);
 
@@ -649,18 +1133,52 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     if (!data) return;
     $('settingsFile').textContent = `保存于 ${data.settingsFile}`;
     $('startupInfo').replaceChildren(
-      el('span', { text: '启动参数（仅可通过环境变量或命令行设置，修改后需重启）：' }),
-      ...data.startup.map((item) => el('span', null, `${item.key} `, el('b', { text: item.value }))));
+      el('div', { class: 'startup-caption', text: '启动参数（仅可通过环境变量或命令行设置，修改后需重启）' }),
+      ...data.startup.map((item) => el('span', { class: 'kv' }, item.key, el('b', { text: item.value }))));
 
     const container = $('settingsGroups');
+    const nav = $('settingsNav');
     container.replaceChildren();
+    nav.replaceChildren(el('div', { class: 'nav-title', text: '分组' }));
     settingsState.fields.clear();
-    for (const group of data.groups) {
+    settingsState.navButtons = [];
+
+    data.groups.forEach((group, groupIndex) => {
+      const sectionId = `settings-group-${groupIndex}`;
       const fields = el('div', { class: 'fields' });
-      for (const item of group.items) fields.append(createField(item));
-      container.append(el('section', { class: 'card' }, el('h2', { text: group.name }), fields));
-    }
+      for (const item of group.items) fields.append(createField(item, groupIndex));
+      container.append(el('section', { class: 'card settings-group', id: sectionId },
+        el('div', { class: 'section-head' }, el('h2', { text: group.name }), el('span', { class: 'count', text: `${group.items.length} 项` })),
+        fields));
+
+      // 用按钮滚动而不是锚点，避免改动 hash 触发页面切换
+      const button = el('button', { type: 'button' }, el('span', { text: group.name }), el('span', { class: 'nav-dot', 'aria-hidden': 'true' }));
+      button.addEventListener('click', () => {
+        $(sectionId).scrollIntoView({ behavior: 'smooth', block: 'start' });
+        setActiveNav(groupIndex);
+      });
+      nav.append(button);
+      settingsState.navButtons.push(button);
+    });
+    setActiveNav(0);
+    observeSettingsGroups();
     updateDirty();
+  }
+
+  function setActiveNav(index) {
+    settingsState.navButtons.forEach((button, i) => button.classList.toggle('active', i === index));
+  }
+
+  let groupObserver = null;
+  function observeSettingsGroups() {
+    if (groupObserver) groupObserver.disconnect();
+    if (!('IntersectionObserver' in window)) return;
+    groupObserver = new IntersectionObserver((entries) => {
+      const visible = entries.filter((entry) => entry.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+      if (visible) setActiveNav(Number(visible.target.id.split('-').pop()));
+    }, { rootMargin: '-90px 0px -60% 0px' });
+    for (const section of $('settingsGroups').children) groupObserver.observe(section);
   }
 
   function sensitivePlaceholder(item) {
@@ -670,12 +1188,12 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     return item.isSet ? `已设置（${item.hint}），留空保持不变` : '未设置';
   }
 
-  function createField(item) {
+  function createField(item, groupIndex) {
     const id = `setting-${item.key}`;
     const locked = item.source === 'locked';
     const sensitive = isSensitive(item);
     const field = el('div', { class: 'field' });
-    const entry = { item, field, cleared: false, original: '', read: () => '' };
+    const entry = { item, field, groupIndex, cleared: false, original: '', read: () => '' };
 
     const head = el('div', { class: 'field-head' },
       el('label', { class: 'name', for: id, text: item.label }),
@@ -685,11 +1203,13 @@ details summary { cursor: pointer; color: var(--text-secondary); }
 
     let control;
     if (item.type === 'boolean') {
-      control = el('input', { type: 'checkbox', id });
+      control = el('input', { type: 'checkbox', id, role: 'switch' });
       control.checked = item.value === 'true';
       entry.original = control.checked ? 'true' : 'false';
       entry.read = () => (control.checked ? 'true' : 'false');
-      field.append(el('label', { class: 'switch' }, control, '启用'));
+      const stateText = el('span', { text: control.checked ? '已启用' : '已关闭' });
+      control.addEventListener('change', () => { stateText.textContent = control.checked ? '已启用' : '已关闭'; });
+      field.append(el('label', { class: 'toggle' }, control, stateText));
     } else {
       if (item.type === 'domains' || item.type === 'headers') {
         control = el('textarea', { id, rows: item.type === 'headers' ? '3' : '2', spellcheck: 'false' });
@@ -716,7 +1236,7 @@ details summary { cursor: pointer; color: var(--text-secondary); }
 
       const row = el('div', { class: 'control-row' }, control);
       if (sensitive && item.isSet && !locked) {
-        const clearButton = el('button', { type: 'button', text: '清除' });
+        const clearButton = el('button', { type: 'button', class: 'btn', text: '清除' });
         clearButton.addEventListener('click', () => {
           entry.cleared = !entry.cleared;
           clearButton.textContent = entry.cleared ? '撤销清除' : '清除';
@@ -735,9 +1255,7 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     control.addEventListener('change', updateDirty);
 
     if (locked) {
-      field.append(el('div', { class: 'lock' },
-        el('span', { 'aria-hidden': 'true', text: '🔒 ' }),
-        `已由${item.lockedBy} 锁定，无法在页面中修改`));
+      field.append(el('div', { class: 'lock' }, icon('lock'), `已由${item.lockedBy} 锁定，无法在页面中修改`));
     }
     const description = [item.description];
     if (!sensitive && item.defaultValue) description.push(`默认 ${item.defaultValue}`);
@@ -782,12 +1300,18 @@ details summary { cursor: pointer; color: var(--text-secondary); }
 
   function updateDirty() {
     let count = 0;
+    const dirtyGroups = new Set();
     for (const entry of settingsState.fields.values()) {
       const changed = entryChange(entry) !== undefined;
       entry.field.classList.toggle('changed', changed);
-      if (changed) count++;
+      if (changed) {
+        count++;
+        dirtyGroups.add(entry.groupIndex);
+      }
     }
+    settingsState.navButtons.forEach((button, index) => button.classList.toggle('dirty', dirtyGroups.has(index)));
     $('settingsDirty').textContent = count ? `${count} 项未保存的修改` : '没有未保存的修改';
+    $('settingsDirtyDot').className = count ? 'dot warn' : 'dot idle';
     $('btnSettingsSave').disabled = count === 0;
     $('btnSettingsReset').disabled = count === 0;
     return count;
@@ -838,6 +1362,13 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     }
   });
 
+  window.addEventListener('beforeunload', (event) => {
+    if (settingsState.data && updateDirty() > 0) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  });
+
   // ---------- 页面切换 ----------
   function route() {
     const settings = location.hash === '#settings';
@@ -867,6 +1398,7 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     renderRunChart();
     renderRunsTable();
     renderRunDetail();
+    renderTop1Spark();
   }
 
   function latencyInRange() {
@@ -879,6 +1411,7 @@ details summary { cursor: pointer; color: var(--text-secondary); }
   }
 
   function renderLatency() {
+    if ($('viewDashboard').hidden) return;
     const samples = latencyInRange();
     $('latencyChart').hidden = state.showLatencyTable;
     $('latencyTable').hidden = !state.showLatencyTable;
@@ -952,6 +1485,7 @@ details summary { cursor: pointer; color: var(--text-secondary); }
   }
 
   function renderRunChart() {
+    if ($('viewDashboard').hidden) return;
     const runs = runsInRange();
     const points = runs.map((run) => {
       const top1 = run.assigned.find((item) => item.rank === 1) || run.assigned[0];
@@ -989,6 +1523,11 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     });
   }
 
+  function assignList(assigned) {
+    return el('span', { class: 'assign-list' }, ...assigned.map((item) => el('span', null,
+      rankKey(item.rank), el('span', { class: 'mono', text: item.ip }), el('span', { class: 'muted', text: fmtMs(item.delayMs) }))));
+  }
+
   function renderRunsTable() {
     const body = $('runsBody');
     body.replaceChildren();
@@ -999,9 +1538,6 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     }
     for (const run of runs) {
       const ok = run.assigned.length > 0;
-      const result = ok
-        ? run.assigned.map((item) => `Top${item.rank} ${item.ip} (${fmtMs(item.delayMs)})`).join('，')
-        : run.note || '无结果';
       const duration = run.finishedAt ? new Date(run.finishedAt) - new Date(run.startedAt) : null;
       body.append(el('tr', null,
         el('td', { class: 'muted', text: run.finishedAt ? fmtDateTime(run.finishedAt) : '进行中' }),
@@ -1012,7 +1548,7 @@ details summary { cursor: pointer; color: var(--text-secondary); }
         el('td', { class: 'num', text: run.firstRoundPassed }),
         el('td', { class: 'num', text: run.secondRoundPassed }),
         el('td', { class: 'num', text: `${run.httpPassed}/${run.httpCandidates}` }),
-        el('td', null, statusBadge(ok, '', ''), ' ', el('span', { class: ok ? 'mono' : 'muted', text: result }))));
+        el('td', null, ok ? assignList(run.assigned) : el('span', { class: 'chip bad' }, icon('x'), run.note || '无结果'))));
     }
   }
 
@@ -1023,33 +1559,46 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     const run = running || runs[runs.length - 1];
 
     $('runTitle').textContent = running ? '正在进行的优选' : '最近一次优选';
-    const progress = $('runProgress');
-    progress.replaceChildren();
+    const meta = $('runMeta');
+    const pipeline = $('runPipeline');
     const body = $('candidateBody');
-    body.replaceChildren();
     const dns = $('dnsUpdates');
+    meta.replaceChildren();
+    pipeline.replaceChildren();
+    body.replaceChildren();
     dns.replaceChildren();
+    $('runSubtitle').textContent = '';
 
     if (!run) {
+      pipeline.hidden = true;
       body.append(el('tr', null, el('td', { colspan: '8', class: 'empty', text: '暂无优选记录' })));
       return;
     }
+    pipeline.hidden = false;
 
-    const stat = (label, value) => el('span', null, `${label} `, el('b', { text: String(value) }));
-    progress.append(
-      stat('开始', fmtDateTime(run.startedAt)),
-      stat('触发', run.trigger),
-      stat('模式', run.mode),
-      stat('抽样', run.sampled),
-      stat('第1轮通过', run.firstRoundPassed),
-      stat('第2轮通过', run.secondRoundPassed),
-      stat('子网缓存', `${run.cachedPassed}/${run.cachedSampled}`),
-      stat('HTTP 通过', `${run.httpPassed}/${run.httpCandidates}`));
+    $('runSubtitle').textContent = fmtDateTime(run.startedAt);
+    const metaChip = (label, value) => el('span', { class: 'chip plain' }, label, el('b', { text: String(value) }));
+    meta.append(metaChip('触发', run.trigger), metaChip('模式', run.mode));
     if (run.finishedAt) {
-      progress.append(stat('耗时', fmtDuration(new Date(run.finishedAt) - new Date(run.startedAt))));
-    } else if (status.phaseDetail) {
-      progress.append(stat('当前', status.phaseDetail));
+      meta.append(metaChip('耗时', fmtDuration(new Date(run.finishedAt) - new Date(run.startedAt))));
+    } else {
+      meta.append(el('span', { class: 'chip' }, el('span', { class: 'dot', style: 'background:var(--accent)' }),
+        status.phaseDetail || '进行中'));
     }
+
+    const stages = [
+      { label: '抽样 IP', value: run.sampled },
+      { label: '第1轮 ICMP 通过', value: run.firstRoundPassed },
+      { label: '第2轮 ICMP 通过', value: run.secondRoundPassed },
+      { label: '子网缓存通过', value: run.cachedPassed, total: run.cachedSampled },
+      { label: 'HTTP 验证通过', value: run.httpPassed, total: run.httpCandidates, final: true }
+    ];
+    stages.forEach((stage, index) => {
+      if (index > 0) pipeline.append(el('span', { class: 'stage-arrow', 'aria-hidden': 'true' }, icon('chevron')));
+      pipeline.append(el('div', { class: `stage${stage.final ? ' final' : ''}` },
+        el('div', { class: 's-label', text: stage.label }),
+        el('div', { class: 's-value' }, String(stage.value), stage.total != null ? el('small', { text: ` / ${stage.total}` }) : null)));
+    });
 
     if (run.candidates.length === 0) {
       body.append(el('tr', null, el('td', { colspan: '8', class: 'empty', text: running ? '正在筛选候选 IP…' : '没有候选 IP 进入 HTTP 验证' })));
@@ -1058,17 +1607,17 @@ details summary { cursor: pointer; color: var(--text-secondary); }
       body.append(el('tr', null,
         el('td', { class: 'muted', text: index + 1 }),
         el('td', { class: 'mono', text: candidate.ip }),
-        el('td', { class: 'muted', text: candidate.source }),
+        el('td', null, el('span', { class: 'chip plain', text: candidate.source })),
         el('td', { class: 'num', text: fmtMs(candidate.pingMs) }),
         el('td', { class: 'num', text: `${candidate.httpSuccess}/${candidate.httpTotal}` }),
         el('td', { class: 'num', text: fmtMs(candidate.httpAvgMs) }),
         el('td', { class: 'num', text: candidate.mbps == null ? '—' : `${candidate.mbps.toFixed(2)} Mbps` }),
         el('td', null, statusBadge(candidate.passed, '通过', '未通过'),
-          candidate.error ? el('span', { class: 'muted', text: ` ${candidate.error}` }) : null)));
+          candidate.error ? el('span', { class: 'err-text', text: candidate.error }) : null)));
     });
 
     if (run.dnsUpdates.length > 0) {
-      dns.append(el('table', null,
+      dns.append(el('div', { class: 'subhead', text: 'DNS 更新' }), el('div', { class: 'table-wrap' }, el('table', null,
         el('thead', null, el('tr', null,
           el('th', { text: 'DNS 服务商' }), el('th', { text: '域名' }), el('th', { text: '排名' }),
           el('th', { text: 'IP' }), el('th', { text: '更新结果' }))),
@@ -1077,7 +1626,7 @@ details summary { cursor: pointer; color: var(--text-secondary); }
           el('td', { class: 'mono', text: update.domain }),
           el('td', null, rankKey(update.rank)),
           el('td', { class: 'mono', text: update.ip }),
-          el('td', null, statusBadge(update.success, '成功', '失败')))))));
+          el('td', null, statusBadge(update.success, '成功', '失败'))))))));
     }
   }
 
@@ -1140,10 +1689,11 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     for (let v = 0; v <= yMax + 1e-9; v += yStep) {
       svg.append(svgEl('line', {
         x1: margin.left, x2: margin.left + plotW, y1: y(v), y2: y(v),
-        stroke: v === 0 ? 'var(--axis)' : 'var(--grid)', 'stroke-width': 1, 'shape-rendering': 'crispEdges'
+        stroke: v === 0 ? 'var(--axis)' : 'var(--grid)', 'stroke-width': 1, 'shape-rendering': 'crispEdges',
+        'stroke-dasharray': v === 0 ? null : '2 4'
       }));
       const label = svgEl('text', {
-        x: margin.left - 8, y: y(v), 'text-anchor': 'end', 'dominant-baseline': 'middle',
+        x: margin.left - 10, y: y(v), 'text-anchor': 'end', 'dominant-baseline': 'middle',
         fill: 'var(--text-muted)', 'font-size': 11, style: 'font-variant-numeric: tabular-nums'
       });
       label.textContent = v >= 1000 ? `${(v / 1000).toFixed(1)}K` : String(Math.round(v * 10) / 10);
@@ -1322,6 +1872,7 @@ details summary { cursor: pointer; color: var(--text-secondary); }
       const node = el('div', { class: 'log-line' }, el('span', { class: 'lt', text: line.time }), line.text);
       if (BAD_LOG.test(line.text)) node.classList.add('bad');
       else if (GOOD_LOG.test(line.text)) node.classList.add('good');
+      else if (WARN_LOG.test(line.text)) node.classList.add('warn');
       node.dataset.text = `${line.time} ${line.text}`.toLowerCase();
       node.hidden = !logMatches(node);
       fragment.append(node);
@@ -1352,9 +1903,11 @@ details summary { cursor: pointer; color: var(--text-secondary); }
   });
 
   $('btnLatencyTable').addEventListener('click', (event) => {
+    const button = event.currentTarget;
     state.showLatencyTable = !state.showLatencyTable;
-    event.currentTarget.setAttribute('aria-pressed', String(state.showLatencyTable));
-    event.currentTarget.textContent = state.showLatencyTable ? '图表' : '表格';
+    button.setAttribute('aria-pressed', String(state.showLatencyTable));
+    button.replaceChildren(icon(state.showLatencyTable ? 'chart' : 'table'),
+      el('span', { class: 'label', text: state.showLatencyTable ? '图表' : '表格' }));
     renderLatency();
   });
 

@@ -36,6 +36,7 @@ namespace CloudflareFastCDN.Web
         private static string? _phaseDetail;
         private static DateTimeOffset _phaseStartedAt = DateTimeOffset.Now;
         private static DateTimeOffset? _nextCheckAt;
+        private static DateTimeOffset? _waitStartedAt;
         private static SelectionRun? _currentRun;
         private static int _historyVersion;
 
@@ -80,6 +81,7 @@ namespace CloudflareFastCDN.Web
                 if (phase != DashboardPhase.Waiting && phase != DashboardPhase.SupplementalCheck)
                 {
                     _nextCheckAt = null;
+                    _waitStartedAt = null;
                 }
             }
         }
@@ -88,6 +90,12 @@ namespace CloudflareFastCDN.Web
         {
             lock (SyncRoot)
             {
+                // 补充检查结束后会以同一到期时间再次进入等待，此时保留原始等待起点，便于页面计算整体进度
+                if (_nextCheckAt != nextCheckAt || _waitStartedAt == null)
+                {
+                    _waitStartedAt = DateTimeOffset.Now;
+                }
+
                 SetPhase(DashboardPhase.Waiting);
                 _nextCheckAt = nextCheckAt;
             }
@@ -238,6 +246,7 @@ namespace CloudflareFastCDN.Web
                     PhaseDetail = _phaseDetail,
                     PhaseStartedAt = _phaseStartedAt,
                     NextCheckAt = _nextCheckAt,
+                    WaitStartedAt = _waitStartedAt,
                     PendingAction = pending switch
                     {
                         ManualCommand.FullSelection => "select",
@@ -358,6 +367,7 @@ namespace CloudflareFastCDN.Web
         public string? PhaseDetail { get; set; }
         public DateTimeOffset PhaseStartedAt { get; set; }
         public DateTimeOffset? NextCheckAt { get; set; }
+        public DateTimeOffset? WaitStartedAt { get; set; }
         public string? PendingAction { get; set; }
         public List<AssignedIpInfo> AssignedIps { get; set; } = new();
         public List<DomainGroupInfo> DomainGroups { get; set; } = new();
