@@ -16,10 +16,10 @@ namespace CloudflareFastCDN.Utils
 
     public class IPProcessor : IIPProcessor
     {
-        private const string DefaultInputFile = "ip.txt";
-
         public bool TestAll { get; set; }
-        public string IPFile { get; set; } = DefaultInputFile;
+
+        /// <summary>网段列表文件；为空时使用 <see cref="AppPaths.IpListFile"/>，不受启动目录影响。</summary>
+        public string? IPFile { get; set; }
         public string IPText { get; set; }
 
         private readonly RandomNumberGenerator _rng;
@@ -42,17 +42,40 @@ namespace CloudflareFastCDN.Utils
                 if (ipsRsp.StatusCode == 200)
                 {
                     var ips = await ipsRsp.GetStringAsync();
-                    File.WriteAllText(DefaultInputFile, ips);
-                    Console.WriteLine("更新IPv4列表成功");
-                }
+                    var lines = ips.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    // 避免把错误页面等非网段内容写入列表，导致之后无法抽样
+                    if (lines.Length == 0 || !lines.All(IsIPv4Cidr))
+                    {
+                        Console.WriteLine("更新IPv4列表失败：返回内容不是IPv4网段列表，继续使用现有列表");
+                        return;
+                    }
 
+                    // 写入数据目录（Docker 下为数据卷），程序目录可能只读，且重建容器后仍然保留
+                    var target = AppPaths.DataFile(AppPaths.IpListFileName);
+                    var tempFile = target + ".tmp";
+                    File.WriteAllText(tempFile, string.Join('\n', lines) + "\n");
+                    File.Move(tempFile, target, overwrite: true);
+                    Console.WriteLine($"更新IPv4列表成功：{lines.Length}个网段，已保存到 {Path.GetFullPath(target)}");
+                }
+                else
+                {
+                    Console.WriteLine($"更新IPv4列表失败：HTTP {ipsRsp.StatusCode}，继续使用现有列表");
+                }
             }
-            catch (Exception ex) 
+            catch (Exception ex)
             {
                 Console.WriteLine($"更新IPv4列表失败 {ex}");
             }
+        }
 
-
+        private static bool IsIPv4Cidr(string line)
+        {
+            var parts = line.Split('/');
+            return parts.Length == 2
+                && IPAddress.TryParse(parts[0], out var address)
+                && address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
+                && int.TryParse(parts[1], out var prefix)
+                && prefix is >= 0 and <= 32;
         }
 
         private byte RandIPEndWith(byte num)
@@ -66,9 +89,23 @@ namespace CloudflareFastCDN.Utils
         public List<IPAddress> LoadIPRanges()
         {
             var ranges = new IPRanges();
-            IEnumerable<string> ips = !string.IsNullOrEmpty(IPText)
-                ? IPText.Split(',').Select(ip => ip.Trim()).Where(ip => !string.IsNullOrEmpty(ip))
-                : File.ReadLines(IPFile ?? DefaultInputFile).Select(l => l.Trim()).Where(l => !string.IsNullOrEmpty(l));
+            IEnumerable<string> ips;
+            if (!string.IsNullOrEmpty(IPText))
+            {
+                ips = IPText.Split(',').Select(ip => ip.Trim()).Where(ip => !string.IsNullOrEmpty(ip));
+            }
+            else
+            {
+                var file = IPFile ?? AppPaths.IpListFile;
+                if (!File.Exists(file))
+                {
+                    // 缺少网段列表时本轮没有可抽样的IP，下个周期重试，不让整个程序退出
+                    Console.WriteLine($"找不到Cloudflare网段列表 {Path.GetFullPath(file)}，本轮无法抽样IP");
+                    return ranges.Ips;
+                }
+
+                ips = File.ReadLines(file).Select(l => l.Trim()).Where(l => !string.IsNullOrEmpty(l));
+            }
 
             foreach (var ip in ips)
             {

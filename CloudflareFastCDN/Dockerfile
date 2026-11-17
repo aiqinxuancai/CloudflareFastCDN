@@ -21,8 +21,8 @@ RUN apt-get update \
     && mkdir -p /data \
     && rm -rf /var/lib/apt/lists/*
 
-# 运行设置通过 Web 管理页面配置并保存到 /data/settings.json；
-# 在此处或 docker run / compose 中设置的环境变量会锁定对应项目，因此镜像不再内置默认值
+# 运行设置保存在 /data/settings.json，可在 Web 管理页面中修改；
+# 旧版的运行设置环境变量只会在首次启动时迁移一次，之后不再读取
 ARG TZ="Etc/UTC"
 ENV TZ=${TZ}
 

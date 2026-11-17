@@ -13,11 +13,8 @@ namespace CloudflareFastCDN.Utils
 
     public class SubnetCache
     {
-        private const int MaxSubnets = 10;
-        private static readonly string CacheFile =
-            File.Exists("/.dockerenv")
-                ? "/data/subnet_cache.json"
-                : "subnet_cache.json";
+        public const int MaxSubnets = 10;
+        private static readonly string CacheFile = AppPaths.DataFile("subnet_cache.json");
 
         private readonly string _ipFile;
         private List<SubnetRecord> _subnets = new();
@@ -25,9 +22,10 @@ namespace CloudflareFastCDN.Utils
 
         public int SubnetCount => _subnets.Count;
 
-        public SubnetCache(string ipFile = "ip.txt")
+        /// <param name="ipFile">网段列表文件；为空时使用 <see cref="AppPaths.IpListFile"/>。</param>
+        public SubnetCache(string? ipFile = null)
         {
-            _ipFile = ipFile;
+            _ipFile = ipFile ?? AppPaths.IpListFile;
         }
 
         public void Load()

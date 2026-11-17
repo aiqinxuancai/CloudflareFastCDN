@@ -1,40 +1,40 @@
+using CloudflareFastCDN.Settings;
+
 namespace CloudflareFastCDN.Utils
 {
-    internal class AppConfig
+    /// <summary>
+    /// 运行参数的只读视图，始终读取 <see cref="SettingsManager.Current"/>，Web 页面保存后立即生效。
+    /// 监听端口与地址只在启动时读取一次，修改后需重启。
+    /// </summary>
+    internal static class AppConfig
     {
-        public static string CloudflareKey { get; set; } = string.Empty;
-        public static string TencentCloudSecretId { get; set; } = string.Empty;
-        public static string TencentCloudSecretKey { get; set; } = string.Empty;
-        public static string AlibabaCloudAccessKeyId { get; set; } = string.Empty;
-        public static string AlibabaCloudAccessKeySecret { get; set; } = string.Empty;
+        private static AppSettings Settings => SettingsManager.Current;
 
-        public static string[] CloudflareDomains { get; set; } = Array.Empty<string>();
-        public static string[] CloudflareDomains2 { get; set; } = Array.Empty<string>();
-        public static string[] CloudflareDomains3 { get; set; } = Array.Empty<string>();
-        public static string[] TencentCloudDomains { get; set; } = Array.Empty<string>();
-        public static string[] TencentCloudDomains2 { get; set; } = Array.Empty<string>();
-        public static string[] TencentCloudDomains3 { get; set; } = Array.Empty<string>();
-        public static string[] AlibabaCloudDomains { get; set; } = Array.Empty<string>();
-        public static string[] AlibabaCloudDomains2 { get; set; } = Array.Empty<string>();
-        public static string[] AlibabaCloudDomains3 { get; set; } = Array.Empty<string>();
+        public static int PingThreads => Settings.Selection.PingThreads;
+        public static int MaxIps => Settings.Selection.MaxIps;
+        public static int HttpCandidateCount => Settings.Selection.HttpCandidateCount;
+        public static int CachedCandidateCount => Settings.Selection.CachedCandidateCount;
+        public static int PingIntervalMs => Settings.Selection.PingIntervalMs;
+        public static bool BandwidthPriority => Settings.Selection.BandwidthPriority;
+        public static bool UpdateIPList => Settings.Selection.UpdateIpList;
 
-        public static int PingThreads { get; set; } = 8;
-        public static int MaxIps { get; set; } = 400;
-        public static int PingIntervalMs { get; set; } = 150;
-        public static string HttpProbeUrl { get; set; } = "https://www.visa.cn/";
-        public static IReadOnlyDictionary<string, string> HttpProbeHeaders { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        public static int HttpProbeTimeoutMs { get; set; } = 4000;
-        public static int HttpSpeedTestTimeoutMs { get; set; } = 10000;
-        public static int HttpSpeedTestIdleTimeoutMs { get; set; } = 3000;
-        public static int RunMinutes { get; set; } = 60;
-        public static bool BandwidthPriority { get; set; } = false;
-        public static bool UpdateIPList { get; set; } = false;
-        public static bool EnableSupplementalHttpCheck { get; set; } = false;
-        public static bool ForceInitialFullSelection { get; set; } = false;
+        public static string HttpProbeUrl => Settings.Http.ProbeUrl;
+        public static IReadOnlyDictionary<string, string> HttpProbeHeaders => Settings.Http.ProbeHeaders;
+        public static int HttpProbeTimeoutMs => Settings.Http.ProbeTimeoutMs;
+        public static int HttpSpeedTestTimeoutMs => Settings.Http.SpeedTestTimeoutMs;
+        public static int HttpSpeedTestIdleTimeoutMs => Settings.Http.SpeedTestIdleTimeoutMs;
 
+        public static int RunMinutes => Settings.Schedule.RunMinutes;
+        public static bool EnableSupplementalHttpCheck => Settings.Schedule.SupplementalHttpCheck;
+        public static bool ForceInitialFullSelection => Settings.Schedule.ForceInitialFullSelection;
+
+        public static string WebUsername => Settings.Web.Username;
+        public static string WebPassword => Settings.Web.Password;
+
+        /// <summary>启动时确定的监听端口，0 表示未启用 Web 管理页面。</summary>
         public static int WebPort { get; set; } = 19401;
+
+        /// <summary>启动时确定的监听地址。</summary>
         public static string WebHost { get; set; } = "127.0.0.1";
-        public static string WebUsername { get; set; } = "admin";
-        public static string WebPassword { get; set; } = string.Empty;
     }
 }

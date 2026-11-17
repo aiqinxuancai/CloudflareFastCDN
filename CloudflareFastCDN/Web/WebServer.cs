@@ -17,7 +17,7 @@ namespace CloudflareFastCDN.Web
         {
             if (AppConfig.WebPort <= 0)
             {
-                Console.WriteLine("Web管理页面未启用（WEB_PORT=0）");
+                Console.WriteLine("Web管理页面未启用（监听端口为 0）");
                 return null;
             }
 
@@ -26,7 +26,7 @@ namespace CloudflareFastCDN.Web
             IPAddress? listenAddress = null;
             if (!listenAnyIp && !listenLocalhost && !IPAddress.TryParse(AppConfig.WebHost, out listenAddress))
             {
-                Console.WriteLine($"Web管理页面启动失败：WEB_HOST={AppConfig.WebHost} 不是有效的IP地址");
+                Console.WriteLine($"Web管理页面启动失败：监听地址 {AppConfig.WebHost} 不是有效的IP地址");
                 return null;
             }
 
@@ -110,7 +110,7 @@ namespace CloudflareFastCDN.Web
                     return Results.BadRequest();
                 }
 
-                var response = SettingsManager.Update(request.Values);
+                var response = SettingsManager.Update(request);
                 if (response.Ok && response.DnsChanged)
                 {
                     response.SelectionQueued = RuntimeControl.QueueFullSelection("DNS配置变更");
@@ -139,7 +139,7 @@ namespace CloudflareFastCDN.Web
             Console.WriteLine($"Web管理页面已启动：http://{displayHost}:{AppConfig.WebPort}/");
             if (string.IsNullOrEmpty(AppConfig.WebPassword))
             {
-                Console.WriteLine("未设置登录密码（WEB_PASSWORD），Web管理页面无需登录即可访问并修改设置；请尽快在设置页面中设置密码");
+                Console.WriteLine("未设置登录密码，Web管理页面无需登录即可访问并修改设置；请尽快在「设置 → Web 管理」中设置密码");
             }
 
             return app;

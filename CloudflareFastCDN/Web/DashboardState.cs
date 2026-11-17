@@ -1,3 +1,4 @@
+using CloudflareFastCDN.Utils;
 using System.Text.Json;
 
 namespace CloudflareFastCDN.Web
@@ -21,10 +22,7 @@ namespace CloudflareFastCDN.Web
         private const int MaxLatencySamples = 5000;
         private const int MaxRuns = 200;
 
-        private static readonly string HistoryFile =
-            File.Exists("/.dockerenv")
-                ? "/data/web_history.json"
-                : "web_history.json";
+        private static readonly string HistoryFile = AppPaths.DataFile("web_history.json");
 
         private static readonly object SyncRoot = new();
         private static readonly DateTimeOffset StartedAt = DateTimeOffset.Now;
@@ -101,21 +99,33 @@ namespace CloudflareFastCDN.Web
             }
         }
 
-        public static void SetAssignedIps(IEnumerable<(int Rank, string Ip, double BaselineMs)> assignedIps)
+        public static void SetAssignedIps(IEnumerable<(int Rank, string Ip, double BaselineMs)> assignedIps, bool preserveCheckState = false)
         {
             lock (SyncRoot)
             {
                 var now = DateTimeOffset.Now;
                 _assignedIps = assignedIps
                     .OrderBy(item => item.Rank)
-                    .Select(item => new AssignedIpInfo
+                    .Select(item =>
                     {
-                        Rank = item.Rank,
-                        Ip = item.Ip,
-                        BaselineMs = Round(item.BaselineMs),
-                        LastDelayMs = Round(item.BaselineMs),
-                        LastCheckedAt = now,
-                        LastCheckOk = true
+                        var existing = preserveCheckState
+                            ? _assignedIps.FirstOrDefault(assigned => assigned.Rank == item.Rank && assigned.Ip == item.Ip)
+                            : null;
+                        if (existing != null)
+                        {
+                            existing.BaselineMs = Round(item.BaselineMs);
+                            return existing;
+                        }
+
+                        return new AssignedIpInfo
+                        {
+                            Rank = item.Rank,
+                            Ip = item.Ip,
+                            BaselineMs = Round(item.BaselineMs),
+                            LastDelayMs = Round(item.BaselineMs),
+                            LastCheckedAt = now,
+                            LastCheckOk = true
+                        };
                     })
                     .ToList();
             }
@@ -190,7 +200,8 @@ namespace CloudflareFastCDN.Web
             UpdateRun(_ => { }, detail);
         }
 
-        public static void CompleteRun(IEnumerable<(int Rank, string Ip, double DelayMs)> assignedIps)
+        public static void CompleteRun(IEnumerable<(int Rank, string Ip, double DelayMs)> assignedIps,
+            IEnumerable<(int Rank, string Ip, double BaselineMs)>? currentAssignedIps = null)
         {
             lock (SyncRoot)
             {
@@ -227,7 +238,15 @@ namespace CloudflareFastCDN.Web
                     });
                 }
 
-                SetAssignedIps(run.Assigned.Select(item => (item.Rank, item.Ip, item.DelayMs)));
+                SetAssignedIps(currentAssignedIps ?? run.Assigned.Select(item => (item.Rank, item.Ip, item.DelayMs)),
+                    preserveCheckState: currentAssignedIps != null);
+                foreach (var assigned in run.Assigned)
+                {
+                    var current = _assignedIps.First(item => item.Rank == assigned.Rank && item.Ip == assigned.Ip);
+                    current.LastDelayMs = assigned.DelayMs;
+                    current.LastCheckedAt = run.FinishedAt;
+                    current.LastCheckOk = true;
+                }
                 SaveHistory();
             }
         }

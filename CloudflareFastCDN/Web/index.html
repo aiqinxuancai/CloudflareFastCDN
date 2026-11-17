@@ -31,6 +31,11 @@
   --series-1: #2a78d6;
   --series-2: #eb6834;
   --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
   --accent: #2a78d6;
   --accent-hover: #256abf;
   --accent-ink: #ffffff;
@@ -72,6 +77,11 @@
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
     --accent: #3987e5;
     --accent-hover: #5598e7;
     --accent-soft: rgba(57, 135, 229, 0.16);
@@ -104,6 +114,11 @@
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
   --accent: #3987e5;
   --accent-hover: #5598e7;
   --accent-soft: rgba(57, 135, 229, 0.16);
@@ -436,6 +451,48 @@ td.empty, .empty { color: var(--text-muted); padding: 28px 0; text-align: center
 }
 .settings-actions .status-text { margin-right: auto; display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 13px; }
 
+/* ---------- 域名与更新排名 ---------- */
+.provider-domains { display: grid; gap: 12px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--grid); }
+.provider-domains h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.domain-list { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); overflow: hidden; }
+.domain-row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 5px 6px 5px 12px; border-bottom: 1px solid var(--grid); }
+.domain-row:last-child { border-bottom: 0; }
+.domain-row:hover { background: var(--wash); }
+.domain-row .name { flex: 1; min-width: 0; font-family: var(--mono); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.domain-row.changed .name::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: 8px; vertical-align: middle; }
+.domain-empty { color: var(--text-muted); font-size: 13px; text-align: center; padding: 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius); }
+.rank-board { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 14px; }
+.rank-slot {
+  position: relative; display: flex; flex-direction: column; gap: 10px; min-height: 128px; padding: 15px 14px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); overflow: hidden;
+  transition: border-color .15s, background-color .15s, box-shadow .15s;
+}
+.rank-slot::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--rank-color, var(--axis)); }
+.rank-slot.unranked { grid-column: 1 / -1; min-height: 0; background: transparent; border-style: dashed; border-color: var(--border-strong); }
+.rank-slot.unranked::before { display: none; }
+.rank-slot.drop-target { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 3px var(--accent-soft); }
+.slot-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.slot-head .count { color: var(--text-muted); font-size: 12.5px; }
+.slot-body { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; flex: 1; }
+.slot-empty { color: var(--text-muted); font-size: 12.5px; }
+select.slot-add {
+  font: inherit; font-size: 13px; width: 100%; height: 30px; padding: 0 8px; cursor: pointer;
+  border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary);
+}
+select.slot-add:hover:not(:disabled) { border-color: var(--border-strong); }
+select.slot-add:disabled { opacity: .55; cursor: not-allowed; }
+.domain-chip.draggable { cursor: grab; padding-right: 3px; user-select: none; }
+.domain-chip.draggable:not(:has(.chip-x)) { padding-right: 9px; }
+.domain-chip.dragging { opacity: .45; }
+.domain-chip.changed { border-color: var(--accent); }
+.chip-x {
+  display: grid; place-items: center; flex: none; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; color: var(--text-muted); cursor: pointer;
+}
+.chip-x:hover { background: var(--wash-strong); color: var(--text-primary); }
+.chip-x .i { width: 12px; height: 12px; stroke-width: 2.4; }
+.rank-board-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 14px; color: var(--text-muted); font-size: 12.5px; }
+
 /* ---------- 弹出层 ---------- */
 .toast {
   position: fixed; right: 24px; bottom: 24px; z-index: 50; max-width: min(400px, calc(100vw - 48px));
@@ -483,7 +540,7 @@ dialog p { margin: 0; color: var(--text-secondary); }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 @media (forced-colors: active) {
-  .rank-card::before, .meter > span { background: CanvasText; }
+  .rank-card::before, .rank-slot::before, .meter > span { background: CanvasText; }
 }
 </style>
 </head>
@@ -507,6 +564,8 @@ dialog p { margin: 0; color: var(--text-secondary); }
   <symbol id="i-eraser" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3a1 1 0 0 1 0-1.4l10-10a1 1 0 0 1 1.4 0l5.6 5.6a1 1 0 0 1 0 1.4L11 21"/><path d="M22 21H7M5 11l9 9"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
   <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="m19 6-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
   <symbol id="i-table" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 10v10"/></symbol>
   <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 6-6"/></symbol>
@@ -528,7 +587,7 @@ dialog p { margin: 0; color: var(--text-secondary); }
     <span id="conn" class="conn" role="alert"></span>
     <span class="actions">
       <button id="btnTheme" type="button" class="btn ghost icon" title="主题：跟随系统" aria-label="切换主题"><svg class="i"><use href="#i-monitor"/></svg></button>
-      <button id="btnRevalidate" type="button" class="btn" title="提前结束等待，立即复检已分配的IP；复检不通过时自动进入全量优选"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg><span class="label">立即复检</span></button>
+      <button id="btnRevalidate" type="button" class="btn" title="提前结束等待，立即复检已分配的IP；仅更换异常IP，保留正常IP并补齐缺失分配"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg><span class="label">立即复检</span></button>
       <button id="btnSelect" type="button" class="btn primary" title="立即执行一次全量优选并更新DNS记录"><svg class="i" aria-hidden="true"><use href="#i-zap"/></svg><span class="label">立即优选</span></button>
     </span>
   </div>
@@ -651,7 +710,7 @@ dialog p { margin: 0; color: var(--text-secondary); }
       <div class="settings-main">
         <section class="card">
           <div class="section-head"><h2>设置</h2><span class="sub" id="settingsFile"></span></div>
-          <p class="settings-intro">保存后立即生效：周期、超时等参数从下一次检测开始使用；修改 DNS 服务商凭证或域名会自动安排一次全量优选。由环境变量或命令行参数指定的项目已锁定，只能通过修改环境变量调整。</p>
+          <p class="settings-intro">所有设置都保存在上方的配置文件中，也可以直接编辑该文件后重启程序。保存后立即生效：周期、超时等参数从下一次检测开始使用；修改已排名的域名、名次或对应服务商的凭证会自动安排一次全量优选；标注「重启后生效」的项目需要重启程序。</p>
           <div class="startup-list" id="startupInfo"></div>
         </section>
         <form id="settingsForm" class="view" novalidate>
@@ -693,11 +752,10 @@ dialog p { margin: 0; color: var(--text-secondary); }
     'supplemental-check': { label: '补充检查', busy: true },
     'not-configured': { label: '待配置', busy: false }
   };
-  const SERIES = [
-    { rank: 1, name: 'Top1', color: 'var(--series-1)' },
-    { rank: 2, name: 'Top2', color: 'var(--series-2)' },
-    { rank: 3, name: 'Top3', color: 'var(--series-3)' }
-  ];
+  // 与服务端的最大名次一致；超出调色板的名次不会出现
+  const SERIES = Array.from({ length: 8 }, (_, index) => ({
+    rank: index + 1, name: `Top${index + 1}`, color: `var(--series-${index + 1})`
+  }));
   const MAX_LOG_LINES = 3000;
   const BAD_LOG = /失败|异常|错误|无法|Exception|Error/i;
   const GOOD_LOG = /已完成更新|均正常|本轮实际分配|已启动/;
@@ -1066,7 +1124,7 @@ dialog p { margin: 0; color: var(--text-secondary); }
         card.append(
           el('div', { class: 'rank-head' }, rankKey(rank), el('span', { class: 'chip warn' }, icon('alert'), '未分配')),
           el('div', { class: 'rank-ip', text: '暂无独立分配的 IP' }),
-          el('p', { class: 'rank-note', text: '该名次已配置域名，但上一轮可用 IP 不足或 DNS 更新失败；下一个周期会重新全量优选。' }),
+          el('p', { class: 'rank-note', text: '该名次已配置域名，但上一轮可用 IP 不足或 DNS 更新失败；下一个周期会单独为它补齐分配。' }),
           domainChips(status, rank));
         return card;
       }
@@ -1117,9 +1175,24 @@ dialog p { margin: 0; color: var(--text-secondary); }
   }
 
   // ---------- 设置 ----------
-  const settingsState = { data: null, fields: new Map(), navButtons: [] };
+  const DRAG_TYPE = 'application/x-cfcdn-domain';
+  const CANDIDATE_COUNT_KEY = 'selection.httpCandidateCount';
+  const DOMAIN_RE = /^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+  const settingsState = {
+    data: null,
+    fields: new Map(),
+    navButtons: [],
+    domains: [],
+    originalDomains: [],
+    providers: new Map(),
+    providerGroups: new Map(),
+    rankingGroup: -1,
+    slotCount: 0
+  };
   const isSensitive = (item) => item.type === 'secret' || item.type === 'headers';
-  const splitDomains = (value) => value.split(/[\s,;，]+/).filter(Boolean);
+  const domainKey = (domain) => `${domain.provider}\n${domain.name}`;
+  const normalizeDomain = (value) => value.trim().replace(/\.+$/, '').toLowerCase();
+  const findDomain = (key) => settingsState.domains.find((domain) => domainKey(domain) === key);
 
   async function loadSettings() {
     const response = await api('/api/settings');
@@ -1131,10 +1204,17 @@ dialog p { margin: 0; color: var(--text-secondary); }
   function renderSettings() {
     const data = settingsState.data;
     if (!data) return;
-    $('settingsFile').textContent = `保存于 ${data.settingsFile}`;
+    $('settingsFile').textContent = `配置文件 ${data.settingsFile}`;
     $('startupInfo').replaceChildren(
-      el('div', { class: 'startup-caption', text: '启动参数（仅可通过环境变量或命令行设置，修改后需重启）' }),
+      el('div', { class: 'startup-caption', text: '当前运行（监听端口和地址修改后需重启才会生效）' }),
       ...data.startup.map((item) => el('span', { class: 'kv' }, item.key, el('b', { text: item.value }))));
+
+    settingsState.domains = data.domains.map((domain) => ({ provider: domain.provider, name: domain.name, rank: domain.rank ?? null }));
+    settingsState.originalDomains = settingsState.domains.map((domain) => Object.assign({}, domain));
+    settingsState.providers = new Map(data.groups.filter((group) => group.kind === 'provider').map((group) => [group.provider, group.name]));
+    settingsState.providerGroups = new Map();
+    settingsState.rankingGroup = -1;
+    settingsState.slotCount = 0;
 
     const container = $('settingsGroups');
     const nav = $('settingsNav');
@@ -1145,11 +1225,26 @@ dialog p { margin: 0; color: var(--text-secondary); }
 
     data.groups.forEach((group, groupIndex) => {
       const sectionId = `settings-group-${groupIndex}`;
-      const fields = el('div', { class: 'fields' });
-      for (const item of group.items) fields.append(createField(item, groupIndex));
-      container.append(el('section', { class: 'card settings-group', id: sectionId },
-        el('div', { class: 'section-head' }, el('h2', { text: group.name }), el('span', { class: 'count', text: `${group.items.length} 项` })),
-        fields));
+      const count = el('span', { class: 'count', id: `${sectionId}-count` });
+      const section = el('section', { class: 'card settings-group', id: sectionId },
+        el('div', { class: 'section-head' }, el('h2', { text: group.name }), count));
+      if (group.description) section.append(el('p', { class: 'settings-intro', text: group.description }));
+      if (group.items.length) {
+        const fields = el('div', { class: 'fields' });
+        for (const item of group.items) fields.append(createField(item, groupIndex));
+        section.append(fields);
+      }
+
+      if (group.kind === 'provider') {
+        settingsState.providerGroups.set(group.provider, groupIndex);
+        section.append(createProviderDomains(group));
+      } else if (group.kind === 'ranking') {
+        settingsState.rankingGroup = groupIndex;
+        section.append(el('div', { id: 'rankingBoard' }));
+      } else {
+        count.textContent = `${group.items.length} 项`;
+      }
+      container.append(section);
 
       // 用按钮滚动而不是锚点，避免改动 hash 触发页面切换
       const button = el('button', { type: 'button' }, el('span', { text: group.name }), el('span', { class: 'nav-dot', 'aria-hidden': 'true' }));
@@ -1160,6 +1255,7 @@ dialog p { margin: 0; color: var(--text-secondary); }
       nav.append(button);
       settingsState.navButtons.push(button);
     });
+    renderDomains();
     setActiveNav(0);
     observeSettingsGroups();
     updateDirty();
@@ -1190,7 +1286,6 @@ dialog p { margin: 0; color: var(--text-secondary); }
 
   function createField(item, groupIndex) {
     const id = `setting-${item.key}`;
-    const locked = item.source === 'locked';
     const sensitive = isSensitive(item);
     const field = el('div', { class: 'field' });
     const entry = { item, field, groupIndex, cleared: false, original: '', read: () => '' };
@@ -1211,8 +1306,8 @@ dialog p { margin: 0; color: var(--text-secondary); }
       control.addEventListener('change', () => { stateText.textContent = control.checked ? '已启用' : '已关闭'; });
       field.append(el('label', { class: 'toggle' }, control, stateText));
     } else {
-      if (item.type === 'domains' || item.type === 'headers') {
-        control = el('textarea', { id, rows: item.type === 'headers' ? '3' : '2', spellcheck: 'false' });
+      if (item.type === 'headers') {
+        control = el('textarea', { id, rows: '3', spellcheck: 'false' });
       } else {
         const inputType = { secret: 'password', integer: 'number', url: 'url' }[item.type] || 'text';
         control = el('input', {
@@ -1226,16 +1321,14 @@ dialog p { margin: 0; color: var(--text-secondary); }
       if (sensitive) {
         control.placeholder = sensitivePlaceholder(item);
       } else {
-        const value = item.type === 'domains' ? splitDomains(item.value || '').join('\n') : item.value || '';
-        control.value = value;
-        entry.original = value;
-        if (item.type === 'domains') control.placeholder = '每行一个域名，例如 cdn.example.com';
-        else if (item.defaultValue) control.placeholder = `默认 ${item.defaultValue}`;
+        control.value = item.value || '';
+        entry.original = control.value;
+        control.placeholder = item.defaultValue ? `默认 ${item.defaultValue}` : '留空自动选择';
       }
       entry.read = () => control.value.trim();
 
       const row = el('div', { class: 'control-row' }, control);
-      if (sensitive && item.isSet && !locked) {
+      if (sensitive && item.isSet) {
         const clearButton = el('button', { type: 'button', class: 'btn', text: '清除' });
         clearButton.addEventListener('click', () => {
           entry.cleared = !entry.cleared;
@@ -1250,13 +1343,11 @@ dialog p { margin: 0; color: var(--text-secondary); }
       field.append(row);
     }
 
-    control.disabled = locked;
     control.addEventListener('input', () => { setFieldError(entry, ''); updateDirty(); });
     control.addEventListener('change', updateDirty);
+    // 可用名次受每轮候选 IP 数限制，修改时同步刷新排名面板
+    if (item.key === CANDIDATE_COUNT_KEY) control.addEventListener('input', renderRanking);
 
-    if (locked) {
-      field.append(el('div', { class: 'lock' }, icon('lock'), `已由${item.lockedBy} 锁定，无法在页面中修改`));
-    }
     const description = [item.description];
     if (!sensitive && item.defaultValue) description.push(`默认 ${item.defaultValue}`);
     if (item.type === 'integer' && item.min != null) description.push(`范围 ${item.min} ~ ${item.max}`);
@@ -1273,19 +1364,290 @@ dialog p { margin: 0; color: var(--text-secondary); }
     entry.field.classList.toggle('invalid', !!message);
   }
 
+  // ---------- 域名 ----------
+  function createProviderDomains(group) {
+    const provider = group.provider;
+    const inputId = `domain-add-${provider}`;
+    const input = el('input', { type: 'text', id: inputId, spellcheck: 'false', autocomplete: 'off', placeholder: '例如 cdn.example.com，可一次粘贴多个' });
+    const addButton = el('button', { type: 'button', class: 'btn' }, icon('plus'), '添加');
+    const error = el('div', { class: 'error', role: 'alert' });
+    const field = el('div', { class: 'field' },
+      el('div', { class: 'field-head' }, el('label', { class: 'name', for: inputId, text: '添加域名' })),
+      el('div', { class: 'control-row' }, input, addButton),
+      el('div', { class: 'desc', text: '新添加的域名不会被更新，请在「更新排名」中把它放到需要的名次。' }),
+      error);
+
+    const submit = () => {
+      const result = addDomains(provider, input.value);
+      error.textContent = result.message;
+      field.classList.toggle('invalid', !!result.message && !result.added);
+      if (result.added) input.value = '';
+      input.focus();
+    };
+    addButton.addEventListener('click', submit);
+    // 输入框位于设置表单内，回车时添加域名而不是保存设置
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        submit();
+      }
+    });
+    input.addEventListener('input', () => {
+      error.textContent = '';
+      field.classList.remove('invalid');
+    });
+
+    return el('div', { class: 'provider-domains' },
+      el('h3', { text: '域名' }),
+      el('div', { id: `domain-list-${provider}` }),
+      field);
+  }
+
+  function addDomains(provider, text) {
+    const names = text.split(/[\s,;，]+/).map(normalizeDomain).filter(Boolean);
+    if (!names.length) return { added: 0, message: '请输入域名' };
+    const invalid = names.filter((name) => name.length > 253 || !DOMAIN_RE.test(name));
+    if (invalid.length) return { added: 0, message: `域名格式无效：${invalid.join('、')}` };
+
+    const existing = new Set(settingsState.domains.filter((domain) => domain.provider === provider).map((domain) => domain.name));
+    const duplicates = [];
+    let added = 0;
+    for (const name of names) {
+      if (existing.has(name)) {
+        duplicates.push(name);
+        continue;
+      }
+      existing.add(name);
+      settingsState.domains.push({ provider, name, rank: null });
+      added++;
+    }
+    if (added) {
+      renderDomains();
+      updateDirty();
+    }
+    return { added, message: duplicates.length ? `已存在，已跳过：${duplicates.join('、')}` : '' };
+  }
+
+  function removeDomain(domain) {
+    settingsState.domains = settingsState.domains.filter((item) => item !== domain);
+    renderDomains();
+    updateDirty();
+    const input = $(`domain-add-${domain.provider}`);
+    if (input) input.focus();
+  }
+
+  function setRank(domain, rank) {
+    domain.rank = rank;
+    renderDomains();
+    updateDirty();
+  }
+
+  function isDomainChanged(domain) {
+    const original = settingsState.originalDomains.find((item) => domainKey(item) === domainKey(domain));
+    return !original || original.rank !== domain.rank;
+  }
+
+  /** 按服务商顺序排列，同一服务商内保持添加顺序 */
+  function sortDomains(domains) {
+    const order = [...settingsState.providers.keys()];
+    return domains.slice().sort((a, b) => order.indexOf(a.provider) - order.indexOf(b.provider));
+  }
+
+  function renderDomains() {
+    for (const provider of settingsState.providers.keys()) renderProviderDomains(provider);
+    renderRanking();
+  }
+
+  function renderProviderDomains(provider) {
+    const list = $(`domain-list-${provider}`);
+    if (!list) return;
+    const domains = settingsState.domains.filter((domain) => domain.provider === provider);
+    const ranked = domains.filter((domain) => domain.rank != null).length;
+    const count = $(`settings-group-${settingsState.providerGroups.get(provider)}-count`);
+    if (count) count.textContent = domains.length ? `${domains.length} 个域名 · ${ranked} 个已排名` : '未添加域名';
+
+    if (!domains.length) {
+      list.replaceChildren(el('div', { class: 'domain-empty', text: '尚未添加域名' }));
+      return;
+    }
+    list.replaceChildren(el('div', { class: 'domain-list' }, ...domains.map((domain) => {
+      const remove = el('button', { type: 'button', class: 'btn ghost icon sm', title: '删除域名', 'aria-label': `删除 ${domain.name}` }, icon('trash'));
+      remove.addEventListener('click', () => removeDomain(domain));
+      return el('div', { class: `domain-row${isDomainChanged(domain) ? ' changed' : ''}` },
+        el('span', { class: 'name', text: domain.name, title: domain.name }),
+        domain.rank != null ? rankKey(domain.rank) : el('span', { class: 'chip plain', text: '未排名' }),
+        remove);
+    })));
+  }
+
+  /** 可用的最高名次：同时受调色板对应的最大名次和（可能尚未保存的）每轮候选 IP 数限制 */
+  function rankLimit() {
+    const maxRank = settingsState.data.maxRank;
+    const entry = settingsState.fields.get(CANDIDATE_COUNT_KEY);
+    const count = entry ? parseInt(entry.read() || entry.item.defaultValue, 10) : NaN;
+    return Number.isFinite(count) && count > 0 ? Math.min(maxRank, count) : maxRank;
+  }
+
+  function renderRanking() {
+    const board = $('rankingBoard');
+    if (!board) return;
+    const limit = rankLimit();
+    const domains = settingsState.domains;
+    const highest = domains.reduce((max, domain) => Math.max(max, domain.rank || 0), 0);
+    // 已使用的名次总是显示，即使超出了上限
+    const slotCount = Math.max(highest, Math.min(limit, Math.max(3, settingsState.slotCount)));
+    settingsState.slotCount = slotCount;
+
+    const count = $(`settings-group-${settingsState.rankingGroup}-count`);
+    if (count) count.textContent = `${domains.filter((domain) => domain.rank != null).length} 个域名已排名`;
+
+    if (!domains.length) {
+      board.replaceChildren(el('div', { class: 'domain-empty', text: '请先在上方的 DNS 服务商中添加域名' }));
+      return;
+    }
+
+    const slots = [];
+    for (let rank = 1; rank <= slotCount; rank++) slots.push(rankSlot(rank, limit));
+    const addSlot = el('button', { type: 'button', class: 'btn sm' }, icon('plus'), '增加名次');
+    addSlot.disabled = slotCount >= limit;
+    addSlot.addEventListener('click', () => {
+      settingsState.slotCount = slotCount + 1;
+      renderRanking();
+    });
+    board.replaceChildren(
+      el('div', { class: 'rank-board' }, ...slots, rankSlot(null)),
+      el('div', { class: 'rank-board-tools' }, addSlot,
+        el('span', { text: `拖动域名即可调整名次，也可以使用每个名次下方的列表；同一域名只能放在一个名次。最多 Top${limit}${limit < settingsState.data.maxRank ? '（受「优选参数」中的每轮候选 IP 数限制）' : ''}。` })));
+  }
+
+  function rankSlot(rank, limit) {
+    const ranked = rank != null;
+    const overLimit = ranked && rank > limit;
+    const domains = sortDomains(settingsState.domains.filter((domain) => domain.rank === rank));
+    const slot = el('div', {
+      class: `rank-slot${ranked ? '' : ' unranked'}`,
+      style: ranked ? `--rank-color:${rankColor(rank)}` : null,
+      role: 'group',
+      'aria-label': ranked ? `Top${rank}` : '未排名'
+    });
+    slot.append(el('div', { class: 'slot-head' },
+      ranked ? rankKey(rank) : el('span', { class: 'rank-key', text: '未排名' }),
+      overLimit
+        ? el('span', { class: 'chip warn', title: `每轮候选 IP 数小于 ${rank}，该名次分配不到 IP，保存时会被拒绝` }, icon('alert'), '超出候选数')
+        : el('span', { class: 'count', text: ranked ? `${domains.length} 个域名` : '不会被更新' })));
+    slot.append(el('div', { class: 'slot-body' }, ...(domains.length
+      ? domains.map(rankChip)
+      : [el('span', { class: 'slot-empty', text: ranked ? '拖入域名，或从下方列表选择' : '所有域名都已排名' })])));
+    if (ranked) slot.append(slotSelect(rank));
+    bindDropZone(slot, rank);
+    return slot;
+  }
+
+  function rankChip(domain) {
+    const chip = el('span', {
+      class: `domain-chip draggable${isDomainChanged(domain) ? ' changed' : ''}`,
+      draggable: 'true',
+      title: `${settingsState.providers.get(domain.provider) || domain.provider}：${domain.name}`
+    }, el('em', { text: domain.provider }), el('span', { text: domain.name }));
+    if (domain.rank != null) {
+      const remove = el('button', { type: 'button', class: 'chip-x', title: '移出排名', 'aria-label': `将 ${domain.name} 移出排名` }, icon('x'));
+      remove.addEventListener('click', () => setRank(domain, null));
+      chip.append(remove);
+    }
+    chip.addEventListener('dragstart', (event) => {
+      event.dataTransfer.setData(DRAG_TYPE, domainKey(domain));
+      event.dataTransfer.setData('text/plain', domain.name);
+      event.dataTransfer.effectAllowed = 'move';
+      chip.classList.add('dragging');
+    });
+    chip.addEventListener('dragend', () => chip.classList.remove('dragging'));
+    return chip;
+  }
+
+  function slotSelect(rank) {
+    const select = el('select', { class: 'slot-add', 'aria-label': `添加域名到 Top${rank}` },
+      el('option', { value: '', text: `添加域名到 Top${rank}…` }));
+    for (const [provider, providerName] of settingsState.providers) {
+      const candidates = settingsState.domains.filter((domain) => domain.provider === provider && domain.rank !== rank);
+      if (!candidates.length) continue;
+      select.append(el('optgroup', { label: providerName }, ...candidates.map((domain) => el('option', {
+        value: domainKey(domain),
+        text: domain.rank != null ? `${domain.name}（当前 Top${domain.rank}）` : domain.name
+      }))));
+    }
+    select.disabled = select.options.length <= 1;
+    select.addEventListener('change', () => {
+      const domain = findDomain(select.value);
+      if (domain) setRank(domain, rank);
+    });
+    return select;
+  }
+
+  function bindDropZone(slot, rank) {
+    // 子元素之间移动也会触发 dragleave，用计数判断是否真正离开
+    let depth = 0;
+    const accepts = (event) => event.dataTransfer && [...event.dataTransfer.types].includes(DRAG_TYPE);
+    slot.addEventListener('dragenter', (event) => {
+      if (!accepts(event)) return;
+      event.preventDefault();
+      depth++;
+      slot.classList.add('drop-target');
+    });
+    slot.addEventListener('dragover', (event) => {
+      if (!accepts(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+    });
+    slot.addEventListener('dragleave', () => {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) slot.classList.remove('drop-target');
+    });
+    slot.addEventListener('drop', (event) => {
+      if (!accepts(event)) return;
+      event.preventDefault();
+      depth = 0;
+      slot.classList.remove('drop-target');
+      const domain = findDomain(event.dataTransfer.getData(DRAG_TYPE));
+      if (domain && domain.rank !== rank) setRank(domain, rank);
+    });
+  }
+
+  /** 与上次加载相比的域名变化：新增、删除、名次变化各算一项 */
+  function domainChanges() {
+    const original = new Map(settingsState.originalDomains.map((domain) => [domainKey(domain), domain]));
+    const current = new Map(settingsState.domains.map((domain) => [domainKey(domain), domain]));
+    const providers = new Set();
+    let ranking = false;
+    let count = 0;
+    for (const [key, domain] of current) {
+      const before = original.get(key);
+      if (!before) {
+        count++;
+        providers.add(domain.provider);
+        if (domain.rank != null) ranking = true;
+      } else if (before.rank !== domain.rank) {
+        count++;
+        ranking = true;
+      }
+    }
+    for (const [key, domain] of original) {
+      if (current.has(key)) continue;
+      count++;
+      providers.add(domain.provider);
+      if (domain.rank != null) ranking = true;
+    }
+    return { count, providers, ranking };
+  }
+
+  // ---------- 保存 ----------
   function entryChange(entry) {
     const item = entry.item;
-    if (item.source === 'locked') return undefined;
     if (isSensitive(item)) {
       if (entry.cleared) return '';
       const value = entry.read();
       return value ? value : undefined;
     }
     const value = entry.read();
-    if (item.type === 'domains') {
-      const current = splitDomains(value).join(',');
-      return current === splitDomains(entry.original).join(',') ? undefined : current;
-    }
     return value === entry.original ? undefined : value;
   }
 
@@ -1309,6 +1671,11 @@ dialog p { margin: 0; color: var(--text-secondary); }
         dirtyGroups.add(entry.groupIndex);
       }
     }
+    const domains = domainChanges();
+    count += domains.count;
+    for (const provider of domains.providers) dirtyGroups.add(settingsState.providerGroups.get(provider));
+    if (domains.ranking) dirtyGroups.add(settingsState.rankingGroup);
+
     settingsState.navButtons.forEach((button, index) => button.classList.toggle('dirty', dirtyGroups.has(index)));
     $('settingsDirty').textContent = count ? `${count} 项未保存的修改` : '没有未保存的修改';
     $('settingsDirtyDot').className = count ? 'dot warn' : 'dot idle';
@@ -1323,35 +1690,42 @@ dialog p { margin: 0; color: var(--text-secondary); }
     event.preventDefault();
     const values = collectChanges();
     const keys = Object.keys(values);
-    if (keys.length === 0) return;
+    const domainsChanged = domainChanges().count > 0;
+    if (keys.length === 0 && !domainsChanged) return;
     const needsRestart = keys.some((key) => settingsState.fields.get(key).item.restartRequired);
+    const body = { values };
+    if (domainsChanged) {
+      body.domains = settingsState.domains.map((domain) => ({ provider: domain.provider, name: domain.name, rank: domain.rank }));
+    }
 
     $('btnSettingsSave').disabled = true;
     try {
       const response = await api('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CFCDN-Action': '1' },
-        body: JSON.stringify({ values })
+        body: JSON.stringify(body)
       });
       const result = await response.json().catch(() => ({ ok: false, message: `HTTP ${response.status}`, errors: {} }));
       for (const entry of settingsState.fields.values()) setFieldError(entry, '');
 
       if (!result.ok) {
+        const errors = result.errors || {};
         let first = null;
-        for (const [key, message] of Object.entries(result.errors || {})) {
+        for (const [key, message] of Object.entries(errors)) {
           const entry = settingsState.fields.get(key);
           if (!entry) continue;
           setFieldError(entry, message);
-          first = first || entry;
+          first = first || entry.field;
         }
-        if (first) first.field.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        showToast(false, result.message);
+        if (!first && errors.domains && settingsState.rankingGroup >= 0) first = $(`settings-group-${settingsState.rankingGroup}`);
+        if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        showToast(false, errors.domains ? `${result.message}：${errors.domains}` : result.message);
         updateDirty();
         return;
       }
 
       let message = result.message;
-      if (result.selectionQueued) message += '；DNS 配置已变更，已安排一次全量优选';
+      if (result.selectionQueued) message += '；需要更新的域名已变更，已安排一次全量优选';
       if (needsRestart) message += '；部分设置需重启后生效';
       showToast(true, message);
       await loadSettings();

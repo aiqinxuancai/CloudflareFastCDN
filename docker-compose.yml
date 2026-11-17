@@ -3,11 +3,13 @@ services:
     image: "${IMAGE_NAME:-ghcr.io/aiqinxuancai/cloudflarefastcdn}:${IMAGE_TAG:-latest}"
     container_name: cloudflare-fast-cdn
     restart: unless-stopped
+    # 提供 TZ；从旧版本升级时，.env 中的旧版运行设置会在首次启动时迁移到 /data/settings.json
     env_file:
       - .env
     cap_add:
       - NET_RAW
     ports:
+      # 宿主机端口:容器端口；更换访问端口时只需修改冒号左侧
       - "${WEB_PORT:-19401}:${WEB_PORT:-19401}"
     volumes:
       - cloudflare-fast-cdn-data:/data

@@ -39,12 +39,12 @@ namespace CloudflareFastCDN.Web
                 var phase = DashboardState.CurrentPhase;
                 if (phase == DashboardPhase.NotConfigured)
                 {
-                    return new ActionResponse(false, "尚未完成DNS配置，请先在设置页面填写DNS服务商凭证和域名");
+                    return new ActionResponse(false, "尚未完成DNS配置，请先在设置页面填写DNS服务商凭证、添加域名并设置更新排名");
                 }
 
                 if (phase == DashboardPhase.Selecting)
                 {
-                    return new ActionResponse(false, "正在执行全量优选，请等待本轮完成");
+                    return new ActionResponse(false, "正在执行优选，请等待本轮完成");
                 }
 
                 if (_pending.Command == ManualCommand.FullSelection)
@@ -67,7 +67,7 @@ namespace CloudflareFastCDN.Web
                 var phase = DashboardState.CurrentPhase;
                 if (phase == DashboardPhase.NotConfigured)
                 {
-                    return new ActionResponse(false, "尚未完成DNS配置，请先在设置页面填写DNS服务商凭证和域名");
+                    return new ActionResponse(false, "尚未完成DNS配置，请先在设置页面填写DNS服务商凭证、添加域名并设置更新排名");
                 }
 
                 if (phase is DashboardPhase.Selecting or DashboardPhase.Revalidating)
