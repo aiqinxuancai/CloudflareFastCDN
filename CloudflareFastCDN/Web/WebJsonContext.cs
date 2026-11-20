@@ -9,6 +9,9 @@ namespace CloudflareFastCDN.Web
     [JsonSerializable(typeof(HistoryData))]
     [JsonSerializable(typeof(LogPage))]
     [JsonSerializable(typeof(ActionResponse))]
+    [JsonSerializable(typeof(SubnetCacheResponse))]
+    [JsonSerializable(typeof(SubnetUpdateRequest))]
+    [JsonSerializable(typeof(SubnetActionResponse))]
     internal partial class WebJsonContext : JsonSerializerContext
     {
     }

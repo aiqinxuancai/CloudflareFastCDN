@@ -527,8 +527,9 @@ namespace CloudflareFastCDN
             var cachedCandidateCount = Math.Min(AppConfig.CachedCandidateCount, httpCandidateCount);
             var processor = new IPProcessor();
 
-            var subnetCache = new SubnetCache();
-            subnetCache.Load();
+            // 与 Web 管理页面共用同一个缓存实例，页面上的增删会立即影响本轮之后的抽样
+            var subnetCache = SubnetCache.Shared;
+            subnetCache.ReloadRanges();
 
             var ipAddresses = processor.LoadIPRanges().Where(ip => !excludedIps.Contains(ip)).ToList();
             ipAddresses = SampleData(ipAddresses, AppConfig.MaxIps);

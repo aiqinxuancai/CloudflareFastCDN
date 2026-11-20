@@ -330,6 +330,19 @@ td.empty, .empty { color: var(--text-muted); padding: 28px 0; text-align: center
 .assign-list > span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .err-text { color: var(--text-muted); font-size: 12.5px; margin-left: 6px; }
 
+/* ---------- 子网缓存 ---------- */
+.card-note { color: var(--text-muted); font-size: 12.5px; margin: -4px 0 12px; }
+.inline-add { display: inline-flex; align-items: center; gap: 8px; margin: 0; }
+.inline-add input {
+  font: inherit; font-size: 13px; height: 28px; padding: 0 10px; width: 260px; max-width: 60vw;
+  border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary);
+  transition: border-color .15s, box-shadow .15s;
+}
+.inline-add input:hover { border-color: var(--border-strong); }
+.inline-add input:focus { outline: none; border-color: var(--accent); background: var(--surface-1); box-shadow: 0 0 0 3px var(--accent-soft); }
+.chip.accent { background: var(--accent-soft); color: var(--text-primary); }
+td.actions-cell { width: 1%; padding-top: 4px; padding-bottom: 4px; }
+
 /* ---------- 优选流程 ---------- */
 .run-meta { display: flex; flex-wrap: wrap; gap: 6px 8px; margin-bottom: 14px; }
 .run-meta .chip b { color: var(--text-primary); font-weight: 600; margin-left: 2px; }
@@ -681,6 +694,26 @@ dialog p { margin: 0; color: var(--text-secondary); }
 
     <section class="card">
       <div class="section-head">
+        <h2>子网缓存</h2>
+        <span class="sub" id="subnetSubtitle"></span>
+        <span class="tools">
+          <form id="subnetForm" class="inline-add" novalidate>
+            <input type="text" id="subnetInput" spellcheck="false" autocomplete="off" placeholder="104.16.1.0/24 或子网内任意 IP" aria-label="要添加的 /24 子网">
+            <button type="submit" class="btn sm" id="btnSubnetAdd"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>添加</button>
+          </form>
+        </span>
+      </div>
+      <p class="card-note" id="subnetNote"></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>子网</th><th>来源</th><th class="num">HTTP 延迟</th><th class="num">连续失败</th><th>加入时间</th><th>下轮优选</th><th aria-label="操作"></th></tr></thead>
+          <tbody id="subnetBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
         <h2>优选历史</h2><span class="sub">最近 50 次</span>
       </div>
       <div class="table-wrap scroll">
@@ -909,6 +942,10 @@ dialog p { margin: 0; color: var(--text-secondary); }
       await refreshHistory();
     } else {
       renderRunDetail();
+    }
+    // 版本取自上次成功读取的缓存内容，读取失败时下次轮询会重试
+    if (!subnetState.data || status.subnetCacheVersion !== subnetState.data.version) {
+      await refreshSubnets();
     }
   }
 
@@ -1730,6 +1767,8 @@ dialog p { margin: 0; color: var(--text-secondary); }
       showToast(true, message);
       await loadSettings();
       refreshStatus().catch(() => {});
+      // 「子网缓存 IP 数」决定下轮抽样哪些子网，不会改变缓存版本，需要单独刷新
+      refreshSubnets().catch(() => {});
     } catch (error) {
       showToast(false, `保存失败：${error.message}`);
       updateDirty();
@@ -2003,6 +2042,98 @@ dialog p { margin: 0; color: var(--text-secondary); }
           el('td', null, statusBadge(update.success, '成功', '失败'))))))));
     }
   }
+
+  // ---------- 子网缓存 ----------
+  const subnetState = { data: null };
+
+  async function refreshSubnets() {
+    const response = await api('/api/subnets');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    subnetState.data = await response.json();
+    renderSubnets();
+  }
+
+  function renderSubnets() {
+    const data = subnetState.data;
+    if (!data) return;
+    const subnets = data.subnets;
+    $('subnetSubtitle').textContent = `${subnets.length} / ${data.maxSubnets} 个 /24 子网`;
+    $('subnetNote').textContent = [
+      data.sampleCount > 0
+        ? `每轮优选从排在最前的 ${data.sampleCount} 个子网中各随机取 1 个 IP 做 TCP Ping，通过的直接进入 HTTP 验证。`
+        : '「子网缓存 IP 数」当前为 0，优选时不会从缓存中取 IP。',
+      'Top1 所在的子网会自动加入并按延迟排序；手动添加的子网固定排在最前，不会因缓存已满被挤出；',
+      `连续 ${data.evictThreshold} 次 TCP Ping 失败的子网会被自动移除。`
+    ].join('');
+
+    const body = $('subnetBody');
+    if (subnets.length === 0) {
+      body.replaceChildren(el('tr', null, el('td', { colspan: '8', class: 'empty', text: '暂无缓存的子网：完成一次优选后会自动加入 Top1 所在的子网，也可以在右上方手动添加' })));
+      return;
+    }
+
+    body.replaceChildren(...subnets.map((record, index) => {
+      const remove = el('button', { type: 'button', class: 'btn ghost icon sm', title: '从缓存中删除', 'aria-label': `删除 ${record.subnet}` }, icon('trash'));
+      remove.addEventListener('click', () => {
+        remove.disabled = true;
+        editSubnet('DELETE', record.subnet).finally(() => { remove.disabled = false; });
+      });
+      const failures = record.consecutiveFailures;
+      return el('tr', null,
+        el('td', { class: 'muted', text: index + 1 }),
+        el('td', { class: 'mono', text: record.subnet }),
+        el('td', null, record.manual
+          ? el('span', { class: 'chip accent plain', text: '手动' })
+          : el('span', { class: 'chip plain', text: '自动' })),
+        el('td', { class: `num${record.delayMs == null ? ' muted' : ''}`, text: record.delayMs == null ? '未测量' : fmtMs(record.delayMs) }),
+        el('td', { class: 'num' }, failures > 0
+          ? el('span', { class: 'chip warn plain', text: `${failures} / ${data.evictThreshold}` })
+          : el('span', { class: 'muted', text: '0' })),
+        el('td', { class: 'muted', text: record.addedAt ? fmtDateTime(record.addedAt) : '—', title: record.addedAt ? null : '旧版缓存文件未记录加入时间' }),
+        el('td', null, index < data.sampleCount
+          ? el('span', { class: 'chip good' }, icon('check'), '抽样')
+          : el('span', { class: 'muted', text: '候补' })),
+        el('td', { class: 'actions-cell' }, remove));
+    }));
+  }
+
+  async function editSubnet(method, subnet) {
+    try {
+      const response = await api('/api/subnets', {
+        method,
+        headers: { 'Content-Type': 'application/json', 'X-CFCDN-Action': '1' },
+        body: JSON.stringify({ subnet })
+      });
+      const result = await response.json().catch(() => ({ ok: false, message: `HTTP ${response.status}` }));
+      if (result.cache) {
+        subnetState.data = result.cache;
+        renderSubnets();
+      }
+      showToast(result.ok, result.message);
+      return result.ok;
+    } catch (error) {
+      showToast(false, `请求失败：${error.message}`);
+      return false;
+    }
+  }
+
+  $('subnetForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const input = $('subnetInput');
+    const button = $('btnSubnetAdd');
+    if (!input.value.trim()) {
+      showToast(false, '请输入子网，例如 104.16.1.0/24');
+      input.focus();
+      return;
+    }
+    button.disabled = true;
+    try {
+      if (await editSubnet('POST', input.value.trim())) input.value = '';
+    } finally {
+      button.disabled = false;
+      input.focus();
+    }
+  });
 
   // ---------- 折线图 ----------
   const TIME_STEPS = [60e3, 5 * 60e3, 10 * 60e3, 15 * 60e3, 30 * 60e3, 3600e3, 2 * 3600e3, 3 * 3600e3,

@@ -255,6 +255,7 @@ namespace CloudflareFastCDN.Web
         {
             // 先读取控制状态，避免与 RuntimeControl 的锁形成嵌套
             var pending = RuntimeControl.Pending;
+            var subnetCacheVersion = SubnetCache.Shared.Version;
             lock (SyncRoot)
             {
                 var status = new StatusResponse
@@ -277,7 +278,8 @@ namespace CloudflareFastCDN.Web
                     CurrentRun = _currentRun,
                     CompletedRuns = _runs.Count,
                     LastRunFinishedAt = _runs.Count > 0 ? _runs[^1].FinishedAt : null,
-                    HistoryVersion = _historyVersion
+                    HistoryVersion = _historyVersion,
+                    SubnetCacheVersion = subnetCacheVersion
                 };
 
                 return JsonSerializer.SerializeToUtf8Bytes(status, WebJsonContext.Default.StatusResponse);
@@ -394,6 +396,7 @@ namespace CloudflareFastCDN.Web
         public int CompletedRuns { get; set; }
         public DateTimeOffset? LastRunFinishedAt { get; set; }
         public int HistoryVersion { get; set; }
+        public int SubnetCacheVersion { get; set; }
     }
 
     internal sealed class HistoryData

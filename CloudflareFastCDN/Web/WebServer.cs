@@ -123,6 +123,16 @@ namespace CloudflareFastCDN.Web
             });
             app.MapPost("/api/actions/select", (HttpContext context) => HandleAction(context, RuntimeControl.RequestFullSelection));
             app.MapPost("/api/actions/revalidate", (HttpContext context) => HandleAction(context, RuntimeControl.RequestRevalidation));
+            app.MapGet("/api/subnets", () => Results.Json(SubnetCacheApi.GetCache(), WebJsonContext.Default.SubnetCacheResponse));
+            // 使用带 return 的异步 lambda，确保绑定到 Delegate 重载并写出返回的结果（而不是被当作 RequestDelegate 丢弃）
+            app.MapPost("/api/subnets", async (HttpContext context) =>
+            {
+                return await HandleSubnetEdit(context, SubnetCacheApi.Add);
+            });
+            app.MapDelete("/api/subnets", async (HttpContext context) =>
+            {
+                return await HandleSubnetEdit(context, SubnetCacheApi.Remove);
+            });
 
             try
             {
@@ -158,6 +168,35 @@ namespace CloudflareFastCDN.Web
                 response,
                 WebJsonContext.Default.ActionResponse,
                 statusCode: response.Accepted ? StatusCodes.Status202Accepted : StatusCodes.Status409Conflict);
+        }
+
+        private static async Task<IResult> HandleSubnetEdit(HttpContext context, Func<SubnetUpdateRequest, SubnetActionResponse> edit)
+        {
+            if (!context.Request.Headers.ContainsKey(ActionHeaderName))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            SubnetUpdateRequest? request;
+            try
+            {
+                request = await JsonSerializer.DeserializeAsync(context.Request.Body, WebJsonContext.Default.SubnetUpdateRequest);
+            }
+            catch (JsonException)
+            {
+                request = null;
+            }
+
+            if (request == null)
+            {
+                return Results.BadRequest();
+            }
+
+            var response = edit(request);
+            return Results.Json(
+                response,
+                WebJsonContext.Default.SubnetActionResponse,
+                statusCode: response.Ok ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest);
         }
 
         private static bool IsAuthorized(HttpRequest request)
